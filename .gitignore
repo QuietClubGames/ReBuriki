@@ -1,0 +1,39 @@
+# --- Game content: never commit (copyrighted; everyone uses their own dump) ---
+*.zip
+roms/
+work/
+# C translated from the game's program, and files generated from it
+recomp/generated/
+recomp/buriki.syms.toml
+recomp/runtime/func_table.cpp
+
+# --- Downloaded toolchain (N64Recomp, Ghidra, JDK, MAME source) ---
+third_party/
+
+# --- Build output ---
+recomp/build_obj/
+recomp/*.exe
+recomp/runtime/recomp.h
+recomp/recomp_log.txt
+tools/**/*.exe
+
+# --- Runs, captures, logs ---
+recomp/*.log
+recomp/*.log.out
+recomp/*.wav
+recomp/*.png
+recomp/frames*/
+recomp/hdtest/
+recomp/run*.txt
+*.bmp
+
+# --- Per-player files written next to the exe ---
+recomp/settings.ini
+recomp/controls.ini
+recomp/nvram.bin
+recomp/nvram.bin.tmp
+recomp/menu_art.png
+
+# --- misc ---
+__pycache__/
+recomp/*.out

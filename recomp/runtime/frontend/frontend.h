@@ -1,0 +1,51 @@
+// The PC front end: window and full-screen handling, Direct3D 11 presentation (GDI fallback), frame pacing,
+// the pause menu, settings.ini / controls.ini, host controls and the arcade's save memory (nvram.bin).
+// Headless runs use only fe_init, fe_read_host and (when asked for) the save memory.
+#pragma once
+#include <stdint.h>
+
+struct FeOptions {
+    bool headless = false;
+    bool throttle = true;              // pace to the arcade's 59.43 Hz (or vsync); false = as fast as possible
+    int scale = 0;                     // --scale N: window N x 448 lines tall for this run (0 = settings.ini)
+    const char* menu_test = nullptr;   // --menu-test PAGE: open the menu on that page, save a screenshot, quit
+    uint32_t menu_test_at = 600;       // ...at this frame
+    const char* menu_shot = nullptr;   // ...to this .bmp (default menu_test_<page>.bmp)
+    bool no_save = false;              // don't write settings.ini / controls.ini (tests)
+    const char* test_keys = nullptr;   // --test-keys "N:key,...": simulated key presses at displayed frame N
+};
+
+// Before hw_init: loads settings.ini and controls.ini from the exe's folder.
+void fe_init(const FeOptions& opt);
+// --set key=value: change a setting for this run only (the menu test uses it); 0 if unknown.
+int fe_override_setting(const char* key_eq_value);
+// BIOS file for the region chosen in the menu (Game page).
+const char* fe_bios_file(void);
+void fe_note_running_bios(const char* file);   // what the board actually boots with
+
+// Called by video.cpp.
+void fe_window_open(void);
+// Show the finished frame, pace to the frame rate, run the menu. While the menu is open this doesn't
+// return: emulated time stops and the same frame keeps being shown under the menu.
+void fe_present_frame(const uint32_t* rgb, int w, int h);
+bool fe_window_active(void);           // a window is open (not headless)
+
+// Called by input.cpp once per emulated frame: the host's keyboard + controllers, already mapped to the
+// arcade controls [player][up, down, left, right, b1-b4, start, coin]. Nothing reaches the game while the
+// menu is open or just after it closes; the menu's "operator menu" action shows up as *test.
+void fe_read_host(bool p[2][10], bool* service, bool* test);
+void fe_controls_load(void);
+
+// Watchdog support: changes while the front end is busy (menu open, window being dragged...).
+uint64_t fe_activity(void);
+
+// Arcade save memory (the 16 KB nvram at physical 0x1F800000): loaded after hw_init, saved when it changes
+// (at most once a second) and at exit. path = nullptr disables it.
+void fe_nvram_init(const char* path);
+void fe_nvram_tick(void);              // once per frame
+void fe_nvram_save(void);
+const char* fe_nvram_path(void);       // nullptr when off
+const char* fe_default_nvram_path(void);   // nvram.bin next to the exe
+
+// Volume for audio_out (0-100, mute folded in).
+int fe_volume(void);

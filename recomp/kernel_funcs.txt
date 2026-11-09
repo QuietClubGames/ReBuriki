@@ -1,0 +1,7 @@
+func_800C2420: mfc0 Cause, mfc0 EPC
+func_800C5C90: mtc0 EntryHi, mtc0 EntryLo0, mtc0 EntryLo1, mtc0 Index, mtc0 PageMask, tlbwi
+func_800C5D30: mfc0 Count
+func_9FC08100: mtc0 EntryHi, mtc0 EntryLo0, mtc0 EntryLo1, mtc0 Index, mtc0 PageMask, tlbwi
+func_9FC09300: mfc0 Config, mtc0 Config
+func_9FC09B04: mfc0 Config, mtc0 Config
+func_9FC09B24: mfc0 Config, mtc0 Config

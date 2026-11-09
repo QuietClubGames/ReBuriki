@@ -1,0 +1,4 @@
+# Function entry points the automatic discovery misses. One hex address per line.
+# 80008000: game entry point (cart header +0x5C). Sits right after the empty BIOS area,
+#           so no "after return" or call-target heuristic finds it.
+80008000

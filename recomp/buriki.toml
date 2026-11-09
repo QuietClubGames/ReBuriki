@@ -1,0 +1,26 @@
+# N64Recomp config for Buriki One. Two code sections (see tools/sections.py):
+#   .text  main game code (cart ROM 0x100000-0x1FFFFF), runs at 0x80000000
+#   .bios  BIOS service routines, recompiled at 0x9FC08100+
+[input]
+symbols_file_path = "buriki.syms.toml"
+rom_file_path = "../work/recomp_rom.bin"
+output_func_path = "generated"
+functions_per_output_file = 100
+recomp_include = "#include \"recomp.h\"\n#include \"kernel.h\""
+# Emits TRACE_ENTRY() at the start of every function. The runtime uses it as the safe point
+# to advance time and deliver interrupts (see runtime/trace.h).
+trace_mode = true
+# The BIOS sets Status.FR (Status = 0x34000000), so the FPU has 32 independent 64-bit registers.
+uses_mips3_float_mode = true
+
+[patches]
+# Low-level CPU control functions (see kernel_funcs.txt). Rewritten by hand in the runtime.
+ignored = [
+    "func_800C2420",  # exception handler: reads Cause/EPC
+    "func_800C5C90",  # TLB setup
+    "func_800C5D30",  # random number generator (reads the cycle counter)
+    "func_9FC08100",  # BIOS: write a TLB entry
+    "func_9FC09300",  # BIOS: cache mode + 4 TLB entries + framebuffer control bytes
+    "func_9FC09B04",  # BIOS: set cache mode (Config)
+    "func_9FC09B24",  # BIOS: flush caches + set cache mode
+]

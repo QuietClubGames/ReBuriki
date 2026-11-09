@@ -1,0 +1,112 @@
+// ---- Buriki One runtime: memory access goes through hw_mem.h instead of raw rdram ----
+// (Replaces N64Recomp's direct "rdram + address - 0x80000000" macros. The rdram argument
+// is unused; all memory lives in the runtime.)
+#include "hw_mem.h"
+
+#define HW_ADDR(offset, reg) ((uint32_t)((uint64_t)(reg) + (uint64_t)(int64_t)(offset)))
+
+#define MEM_W(offset, reg)  (MemRef32{HW_ADDR(offset, reg)})
+#define MEM_H(offset, reg)  (MemRef16{HW_ADDR(offset, reg)})
+#define MEM_HU(offset, reg) (MemRef16U{HW_ADDR(offset, reg)})
+#define MEM_B(offset, reg)  (MemRef8{HW_ADDR(offset, reg)})
+#define MEM_BU(offset, reg) (MemRef8U{HW_ADDR(offset, reg)})
+
+#define SD(val, offset, reg) { \
+    uint32_t sd_addr_ = HW_ADDR(offset, reg); \
+    uint64_t sd_val_ = (uint64_t)(gpr)(val); \
+    mem_w32(sd_addr_ + 0, (uint32_t)(sd_val_ >> 32)); \
+    mem_w32(sd_addr_ + 4, (uint32_t)(sd_val_ >> 0)); \
+}
+
+static inline uint64_t load_doubleword(uint8_t* rdram, gpr reg, gpr offset) {
+    (void)rdram;
+    uint32_t a = HW_ADDR(offset, reg);
+    uint64_t hi = mem_r32(a + 0);
+    uint64_t lo = mem_r32(a + 4);
+    return (hi << 32) | lo;
+}
+
+#define LD(offset, reg) \
+    load_doubleword(rdram, offset, reg)
+
+static inline gpr do_lwl(uint8_t* rdram, gpr initial_value, gpr offset, gpr reg) {
+    (void)rdram;
+    uint32_t address = HW_ADDR(offset, reg);
+    uint32_t loaded_value = mem_r32(address & ~3u);
+    uint32_t misalignment = address & 3u;
+    gpr masked_value = initial_value & (gpr)(uint32_t)~(0xFFFFFFFFu << (misalignment * 8));
+    loaded_value <<= (misalignment * 8);
+    return (gpr)(int32_t)(masked_value | loaded_value);
+}
+
+static inline gpr do_lwr(uint8_t* rdram, gpr initial_value, gpr offset, gpr reg) {
+    (void)rdram;
+    uint32_t address = HW_ADDR(offset, reg);
+    uint32_t loaded_value = mem_r32(address & ~3u);
+    uint32_t misalignment = address & 3u;
+    gpr masked_value = initial_value & (gpr)(uint32_t)~(0xFFFFFFFFu >> (24 - misalignment * 8));
+    loaded_value >>= (24 - misalignment * 8);
+    return (gpr)(int32_t)(masked_value | loaded_value);
+}
+
+static inline void do_swl(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
+    (void)rdram;
+    uint32_t address = HW_ADDR(offset, reg);
+    uint32_t word_address = address & ~3u;
+    uint32_t initial_value = mem_r32(word_address);
+    uint32_t misalignment = address & 3u;
+    uint32_t masked_initial_value = initial_value & ~(0xFFFFFFFFu >> (misalignment * 8));
+    uint32_t shifted_input_value = ((uint32_t)val) >> (misalignment * 8);
+    mem_w32(word_address, masked_initial_value | shifted_input_value);
+}
+
+static inline void do_swr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
+    (void)rdram;
+    uint32_t address = HW_ADDR(offset, reg);
+    uint32_t word_address = address & ~3u;
+    uint32_t initial_value = mem_r32(word_address);
+    uint32_t misalignment = address & 3u;
+    uint32_t masked_initial_value = initial_value & ~(0xFFFFFFFFu << (24 - misalignment * 8));
+    uint32_t shifted_input_value = ((uint32_t)val) << (24 - misalignment * 8);
+    mem_w32(word_address, masked_initial_value | shifted_input_value);
+}
+
+static inline gpr do_ldl(uint8_t* rdram, gpr initial_value, gpr offset, gpr reg) {
+    uint32_t address = HW_ADDR(offset, reg);
+    uint64_t loaded_value = load_doubleword(rdram, 0, address & ~7u);
+    uint32_t misalignment = address & 7u;
+    gpr masked_value = initial_value & ~(0xFFFFFFFFFFFFFFFFull << (misalignment * 8));
+    loaded_value <<= (misalignment * 8);
+    return masked_value | loaded_value;
+}
+
+static inline gpr do_ldr(uint8_t* rdram, gpr initial_value, gpr offset, gpr reg) {
+    uint32_t address = HW_ADDR(offset, reg);
+    uint64_t loaded_value = load_doubleword(rdram, 0, address & ~7u);
+    uint32_t misalignment = address & 7u;
+    gpr masked_value = initial_value & ~(0xFFFFFFFFFFFFFFFFull >> (56 - misalignment * 8));
+    loaded_value >>= (56 - misalignment * 8);
+    return masked_value | loaded_value;
+}
+
+static inline void do_sdl(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
+    uint32_t address = HW_ADDR(offset, reg);
+    uint32_t dword_address = address & ~7u;
+    uint64_t initial_value = load_doubleword(rdram, 0, dword_address);
+    uint32_t misalignment = address & 7u;
+    uint64_t ret = (initial_value & ~(0xFFFFFFFFFFFFFFFFull >> (misalignment * 8))) | (val >> (misalignment * 8));
+    mem_w32(dword_address + 0, (uint32_t)(ret >> 32));
+    mem_w32(dword_address + 4, (uint32_t)ret);
+}
+
+static inline void do_sdr(uint8_t* rdram, gpr offset, gpr reg, gpr val) {
+    uint32_t address = HW_ADDR(offset, reg);
+    uint32_t dword_address = address & ~7u;
+    uint64_t initial_value = load_doubleword(rdram, 0, dword_address);
+    uint32_t misalignment = address & 7u;
+    uint64_t ret = (initial_value & ~(0xFFFFFFFFFFFFFFFFull << (56 - misalignment * 8))) | (val << (56 - misalignment * 8));
+    mem_w32(dword_address + 0, (uint32_t)(ret >> 32));
+    mem_w32(dword_address + 4, (uint32_t)ret);
+}
+// ---- end of Buriki One memory section ----
+
