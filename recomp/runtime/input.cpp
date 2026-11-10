@@ -52,6 +52,18 @@ bool script_held(const char* name) {
 void input_set_script(const char* script) {
     g_use_script = true;
     std::string s = script;
+    if (!s.empty() && s[0] == '@') {   // "@file": read the script from a file (long scripts)
+        FILE* f = fopen(s.c_str() + 1, "rb");
+        if (!f) { fprintf(stderr, "[input] can't read script file %s\n", s.c_str() + 1); s.clear(); }
+        else {
+            s.clear();
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) s.append(buf, n);
+            fclose(f);
+            while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        }
+    }
     size_t pos = 0;
     while (pos <= s.size()) {
         size_t end = s.find(';', pos);

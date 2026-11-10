@@ -37,3 +37,4 @@ recomp/menu_art.png
 # --- misc ---
 __pycache__/
 recomp/*.out
+recomp/soak_script.txt

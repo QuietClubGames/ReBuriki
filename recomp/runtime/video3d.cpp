@@ -662,6 +662,7 @@ extern "C" void video3d_clear(void) {
     g_hd_tris.clear();
 }
 
+void video3d_live_tri_count(size_t* n) { *n = g_hd_tris.size(); }
 static std::vector<HdTri> g_hd_frame;
 void video3d_hd_snapshot(void) { g_hd_frame = g_hd_tris; }
 const HdTri* video3d_hd_tris(size_t* count) { *count = g_hd_frame.size(); return g_hd_frame.data(); }

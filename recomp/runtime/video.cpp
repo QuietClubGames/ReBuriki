@@ -14,7 +14,11 @@
 #include "hd3d.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -231,30 +235,44 @@ int get_blend_mode(int tm) {
 struct TilemapKind { int tile_w, tile_h, cols, rows, size; };
 const TilemapKind TM_8x8 = {8, 8, 128, 128, 0}, TM_16x16 = {16, 16, 128, 128, 1}, TM_16x16_ALT = {16, 16, 256, 64, 1};
 
+// The decoded MAME get_tile_info for the last tile looked up. Neighbouring pixels are usually
+// in the same tile, so this skips re-decoding the tile entry for each pixel. (Speed only: the
+// result is identical.) One per drawing call, so it's safe with lines drawn in parallel.
+struct TileCache {
+    u32 index = 0xFFFFFFFFu;
+    const Gfx* g = nullptr;
+    u32 code = 0, colorbase = 0;
+    int flip = 0;
+};
+
 // MAME get_tile_info + pixmap lookup. Returns false for a transparent pixel.
-inline bool tilemap_pixel(int tm, const TilemapKind& k, u32 px, u32 py, u16& pen) {
+inline bool tilemap_pixel(int tm, const TilemapKind& k, u32 px, u32 py, u16& pen, TileCache& tc) {
     const u32 col = px / k.tile_w, row = py / k.tile_h;
     const u32 tile_index = row * k.cols + col;
-    u32 tileno = m_videoram[tile_index + (tm << 14)];
-    const u32 pal = (tileno & 0xff000000) >> 24;
-    const int flip = (tileno & 0x00c00000) >> 22;
-    if ((tileno >> 21) & 1)
-        if ((m_videoregs[0x01] >> 16) & 1) tileno = (tileno & m_videoregs[0x0b]) | m_videoregs[0x0c];
-    tileno &= 0x1fffff;
+    if (tile_index != tc.index) {
+        tc.index = tile_index;
+        u32 tileno = m_videoram[tile_index + (tm << 14)];
+        const u32 pal = (tileno & 0xff000000) >> 24;
+        tc.flip = (tileno & 0x00c00000) >> 22;
+        if ((tileno >> 21) & 1)
+            if ((m_videoregs[0x01] >> 16) & 1) tileno = (tileno & m_videoregs[0x0b]) | m_videoregs[0x0c];
+        tileno &= 0x1fffff;
 
-    const bool bpp8 = (get_tileregs(tm) >> 10) & 1;
-    int gfxn; u32 code, color;
-    if (k.size == 0) { if (bpp8) { gfxn = 1; code = tileno >> 1; color = pal >> 4; } else { gfxn = 0; code = tileno; color = pal; } }
-    else             { if (bpp8) { gfxn = 3; code = tileno >> 3; color = pal >> 4; } else { gfxn = 2; code = tileno >> 2; color = pal; } }
-    const Gfx& g = g_gfx[gfxn];
-    code %= g.elements;
-
+        const bool bpp8 = (get_tileregs(tm) >> 10) & 1;
+        int gfxn; u32 code, color;
+        if (k.size == 0) { if (bpp8) { gfxn = 1; code = tileno >> 1; color = pal >> 4; } else { gfxn = 0; code = tileno; color = pal; } }
+        else             { if (bpp8) { gfxn = 3; code = tileno >> 3; color = pal >> 4; } else { gfxn = 2; code = tileno >> 2; color = pal; } }
+        tc.g = &g_gfx[gfxn];
+        tc.code = code % tc.g->elements;
+        tc.colorbase = tc.g->granularity * (color % tc.g->colors);
+    }
+    const Gfx& g = *tc.g;
     int x = px % k.tile_w, y = py % k.tile_h;
-    if (flip & 1) x = k.tile_w - 1 - x;    // TILE_FLIPX
-    if (flip & 2) y = k.tile_h - 1 - y;    // TILE_FLIPY
-    const u8 p = gfx_pixel(g, code, x, y);
-    if (p == 0) return false;               // transparent pen 0
-    pen = (u16)(g.granularity * (color % g.colors) + p);
+    if (tc.flip & 1) x = k.tile_w - 1 - x;    // TILE_FLIPX
+    if (tc.flip & 2) y = k.tile_h - 1 - y;    // TILE_FLIPY
+    const u8 p = gfx_pixel(g, tc.code, x, y);
+    if (p == 0) return false;                  // transparent pen 0
+    pen = (u16)(tc.colorbase + p);
     return true;
 }
 
@@ -351,6 +369,7 @@ void tilemap_draw_roz_core_line(const Rect& cliprect, int tm, const TilemapKind&
     int mosaic_counter = 0;
     bool opaque = false;
     u16 datasrc = 0;
+    TileCache tc;
     for (int x = cliprect.min_x; x <= cliprect.max_x; x++, dest++, cx += incxx, cy += incxy) {
         u32 sx, sy;
         if (wraparound) { sx = (cx >> 16) & xmask; sy = (cy >> 16) & ymask; }
@@ -359,7 +378,7 @@ void tilemap_draw_roz_core_line(const Rect& cliprect, int tm, const TilemapKind&
             sx = cx >> 16; sy = cy >> 16;
         }
         if (mosaic_counter == 0) {
-            opaque = tilemap_pixel(tm, k, sx, sy, datasrc);
+            opaque = tilemap_pixel(tm, k, sx, sy, datasrc, tc);
             mosaic_counter = mosaic;
         } else mosaic_counter--;
         if (opaque) {
@@ -458,12 +477,46 @@ void draw_sprite_line(s32 curyy, s16 ypos, s16 xpos, int chainx, s32 dx, int yti
 
 inline int sext(int v, int bits) { return (int)((unsigned)v << (32 - bits)) >> (32 - bits); }
 
+// Draw lines y0..y1 in parallel (LinePool, below).
+void run_lines(int y0, int y1, const std::function<void(int)>& fn);
+
+struct SpriteJob {
+    int currentsprite;
+    int ystart, xpos, height;
+    s32 dx, dy;
+    int chainx, chainy, chaini, xflip, yflip;
+    u16 zval;
+    bool blend;
+    u16 group;
+    bool checkerboard;
+    u8 mosaic;
+};
+std::vector<SpriteJob> g_sprite_jobs;
+bool g_sprite_zsort = false;
+
+// One screen line of every queued sprite, in sprite-list order (MAME's per-sprite row loop).
+void draw_sprites_line(int y) {
+    for (const SpriteJob& j : g_sprite_jobs) {
+        const int curyy = y - j.ystart;
+        if (curyy < 0 || curyy >= j.height) continue;
+        // MAME's mosaic row counter: realline repeats each (mosaic + 1) rows.
+        const int realline = j.mosaic ? curyy - curyy % (j.mosaic + 1) : curyy;
+        const u32 full_srcpix_y2 = realline * j.dy;
+        const int used_ysource_pos = full_srcpix_y2 >> 16;
+        draw_sprite_line(used_ysource_pos & 0xf, (s16)y, (s16)j.xpos, j.chainx, j.dx, used_ysource_pos / 0x10, j.chaini,
+                         j.currentsprite, j.chainy, j.xflip, j.yflip, j.zval, g_sprite_zsort, j.blend, j.group,
+                         j.checkerboard, j.mosaic);
+    }
+}
+
 void draw_sprites_buffer() {
     memset(m_sprite_bitmap, 0, sizeof(m_sprite_bitmap));
     const int spriteoffsx = (m_spriteregs[1] >> 0) & 0xffff;
     const int spriteoffsy = (m_spriteregs[1] >> 16) & 0xffff;
     const bool zsort = !((m_spriteregs[0] >> 24) & 1);
     for (auto& z : m_sprite_zbuffer) z = zsort ? 0x0000 : 0x07ff;
+    g_sprite_jobs.clear();
+    g_sprite_zsort = zsort;
 
     int nextsprite = 0, currentsprite = 0;
     while (currentsprite < (0xc000 / 4) / 8) {
@@ -497,21 +550,14 @@ void draw_sprites_buffer() {
         u32 full_srcpix_y = 0, full_dstheight = 0;
         do { full_srcpix_y += dy; full_dstheight++; } while (full_srcpix_y < (u32)((chainy + 1) * 0x100000) && full_dstheight < 4096);
 
-        int realline = 0, mosaic_y_counter = 0;
-        for (s32 curyy = 0; curyy <= (s32)full_dstheight - 1; curyy++) {
-            if (!mosaic) realline = curyy;
-            else if (mosaic_y_counter == 0) { realline = curyy; mosaic_y_counter = mosaic; }
-            else mosaic_y_counter--;
-            if (ypos <= g_visarea.max_y && ypos >= g_visarea.min_y) {
-                const u32 full_srcpix_y2 = realline * dy;
-                const int used_ysource_pos = full_srcpix_y2 >> 16;
-                draw_sprite_line(used_ysource_pos & 0xf, ypos, xpos, chainx, dx, used_ysource_pos / 0x10, chaini,
-                                 currentsprite, chainy, xflip, yflip, zval, zsort, blend, group, checkerboard, mosaic);
-            }
-            ypos++;
-        }
+        // MAME draws each sprite's rows here, top to bottom. We queue the sprite and draw all
+        // sprites line by line below (in parallel); per line they're still drawn in this order,
+        // so the z-buffer results are identical.
+        g_sprite_jobs.push_back({currentsprite, ypos, xpos, (int)full_dstheight, dx, dy, chainx, chainy, chaini,
+                                 xflip, yflip, zval, blend, group, checkerboard, mosaic});
         currentsprite = nextsprite;
     }
+    run_lines(g_visarea.min_y, g_visarea.max_y, draw_sprites_line);
 }
 
 void mixsprites_test(u16 priority, int y) {
@@ -561,13 +607,86 @@ void update_visarea() {
     g_visarea = {min_x, std::min<int>(min_x + max_x - 1, VIDEO_W - 1), min_y, std::min<int>(min_y + max_y - 1, VIDEO_H - 1)};
 }
 
-void draw_front_layers() {
-    for (int y = g_visarea.min_y; y <= g_visarea.max_y; y++)
-        for (int i = 0x0f; i >= 0x00; i--) {
-            for (int j = 0; j < 4; j++) if ((get_tileregs(j) & 0x1f) == i) draw_tilemap(j, y);
-            if ((i & 3) == 0) mixsprites_test((u16)((i / 4) << 12), y);
+// ---- drawing lines in parallel -----------------------------------------------------------------
+// Each screen line only reads shared state and writes its own line, so lines can be drawn on
+// several CPU cores at once with exactly the same result.
+class LinePool {
+public:
+    void run(int y0, int y1, const std::function<void(int)>& fn) {
+        if (y1 < y0) return;
+        start_workers();
+        if (m_workers.empty()) { for (int y = y0; y <= y1; y++) fn(y); return; }
+        {
+            std::lock_guard<std::mutex> lk(m_mu);
+            m_fn = &fn; m_next = y0; m_last = y1; m_busy = (int)m_workers.size(); m_gen++;
         }
+        m_cv.notify_all();
+        work();
+        std::unique_lock<std::mutex> lk(m_mu);
+        m_done_cv.wait(lk, [&] { return m_busy == 0; });
+        m_fn = nullptr;
+    }
+    ~LinePool() {
+        { std::lock_guard<std::mutex> lk(m_mu); m_quit = true; m_gen++; }
+        m_cv.notify_all();
+        for (auto& t : m_workers) t.join();
+    }
+private:
+    void start_workers() {
+        if (m_started) return;
+        m_started = true;
+        unsigned n = std::thread::hardware_concurrency();
+        n = n > 1 ? std::min(n - 1, 7u) : 0;    // the calling thread works too
+        for (unsigned i = 0; i < n; i++) m_workers.emplace_back([this] { loop(); });
+    }
+    void work() {
+        for (;;) {
+            const int y = m_next.fetch_add(1);
+            if (y > m_last) break;
+            (*m_fn)(y);
+        }
+    }
+    void loop() {
+        uint64_t seen = 0;
+        for (;;) {
+            {
+                std::unique_lock<std::mutex> lk(m_mu);
+                m_cv.wait(lk, [&] { return m_gen != seen; });
+                seen = m_gen;
+                if (m_quit) return;
+            }
+            work();
+            std::lock_guard<std::mutex> lk(m_mu);
+            if (--m_busy == 0) m_done_cv.notify_one();
+        }
+    }
+    std::vector<std::thread> m_workers;
+    std::mutex m_mu;
+    std::condition_variable m_cv, m_done_cv;
+    const std::function<void(int)>* m_fn = nullptr;
+    std::atomic<int> m_next{0};
+    int m_last = 0, m_busy = 0;
+    uint64_t m_gen = 0;
+    bool m_quit = false, m_started = false;
+};
+LinePool g_lines;
+void run_lines(int y0, int y1, const std::function<void(int)>& fn) { g_lines.run(y0, y1, fn); }
+
+void draw_back_line(int y) {
+    for (int i = 0x1f; i >= 0x10; i--) {
+        for (int j = 0; j < 4; j++) if ((get_tileregs(j) & 0x1f) == i) draw_tilemap(j, y);
+        if ((i & 3) == 0) mixsprites_test((u16)((i / 4) << 12), y);
+    }
 }
+
+void draw_front_line(int y) {
+    for (int i = 0x0f; i >= 0x00; i--) {
+        for (int j = 0; j < 4; j++) if ((get_tileregs(j) & 0x1f) == i) draw_tilemap(j, y);
+        if ((i & 3) == 0) mixsprites_test((u16)((i / 4) << 12), y);
+    }
+}
+
+void draw_front_layers() { g_lines.run(g_visarea.min_y, g_visarea.max_y, draw_front_line); }
 
 void screen_update(bool split) {
     g_layers_ok = false;
@@ -580,11 +699,7 @@ void screen_update(bool split) {
     draw_sprites_buffer();
     if ((m_tcram[0x24 / 4] >> 17) & 1) return;
 
-    for (int y = g_visarea.min_y; y <= g_visarea.max_y; y++)
-        for (int i = 0x1f; i >= 0x10; i--) {
-            for (int j = 0; j < 4; j++) if ((get_tileregs(j) & 0x1f) == i) draw_tilemap(j, y);
-            if ((i & 3) == 0) mixsprites_test((u16)((i / 4) << 12), y);
-        }
+    g_lines.run(g_visarea.min_y, g_visarea.max_y, draw_back_line);
     if (split) memcpy(g_below, g_bitmap, sizeof(g_below));
     draw_3d_layer();
     draw_front_layers();
@@ -678,7 +793,19 @@ extern "C" void video_frame(void) {
     // frame's 3D triangles (taken before the vblank clear below). Rendering only: game state
     // and the 512x448 picture are unchanged either way.
     const bool hd = !g_video_cfg.headless && fe_setting_enhanced();
-    screen_update(hd);
+    {
+        // Diagnostics: average time per frame for the 2D/3D picture, and how many 3D triangles
+        // were drawn since the last 3D clear, every 600 frames.
+        static double t_total = 0; static uint64_t tris_total = 0;
+        auto t0 = std::chrono::steady_clock::now();
+        screen_update(hd);
+        t_total += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        size_t n = 0; video3d_live_tri_count(&n); tris_total += n;
+        if (hw_frame_number() % 600 == 0) {
+            fprintf(stderr, "[perf] picture %.2f ms/frame, 3D triangles %llu/frame\n", t_total * 1000 / 600, (unsigned long long)(tris_total / 600));
+            t_total = 0; tris_total = 0;
+        }
+    }
     if (hd) video3d_hd_snapshot();
     // MAME screen_vblank: at the start of vblank, clear the 3D buffers if tcram 0x50 bit 16 is set.
     if ((m_tcram[0x50 / 4] >> 16) & 1) video3d_clear();

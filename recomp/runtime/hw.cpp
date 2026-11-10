@@ -4,6 +4,7 @@
 #include "input.h"
 #include "funcs.h"
 
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -57,6 +58,12 @@ bool g_in_vblank = false;
 uint32_t g_frame = 0;
 uint64_t g_next_vblank = 0, g_vblank_end = 0, g_fifo_irq_at = UINT64_MAX;
 uint64_t g_next_mcu = 0;
+double g_perf_video = 0, g_perf_sound = 0, g_perf_io = 0;   // seconds spent, for [perf] lines
+struct PerfTimer {
+    double& acc; std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    explicit PerfTimer(double& a) : acc(a) {}
+    ~PerfTimer() { acc += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); }
+};
 constexpr uint64_t MCU_SLICE_TICKS = 256;   // how often the I/O MCU is caught up
 bool g_in_irq = false;
 uint64_t g_irq_count[32] = {};
@@ -449,11 +456,21 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
         g_vblank_end = g_ticks + g_cfg.ticks_per_frame / 12;
         g_in_vblank = true;
         g_frame++;
-        video_frame();               // draw + present the frame the game just built
+        { PerfTimer t(g_perf_video); video_frame(); }   // draw + present the frame the game just built
         input_sample_frame();        // controls for the next frame
-        sound_frame();               // this frame's audio to the speakers / WAV
+        { PerfTimer t(g_perf_sound); sound_frame(); }   // this frame's audio to the speakers / WAV
         raise_irq(1u << 0);
         if (g_frame <= 5 || g_frame % 60 == 0) fprintf(stderr, "[frame] %u  (%llu calls)\n", g_frame, (unsigned long long)g_ticks);
+        if (g_frame % 600 == 0) {   // speed report every 10 s of game time (wall clock, display only)
+            static auto last = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            double s = std::chrono::duration<double>(now - last).count();
+            last = now;
+            fprintf(stderr, "[perf] frames %u-%u: %.0f fps | video %.0f%% sound %.0f%% io %.0f%% other (game) %.0f%%\n",
+                    g_frame - 600, g_frame, 600.0 / s, 100 * g_perf_video / s, 100 * g_perf_sound / s, 100 * g_perf_io / s,
+                    100 * (s - g_perf_video - g_perf_sound - g_perf_io) / s);
+            g_perf_video = g_perf_sound = g_perf_io = 0;
+        }
         if (g_cfg.max_frames && g_frame >= g_cfg.max_frames) {
             // Fingerprint of main RAM: two runs with the same inputs must print the same value.
             uint64_t h = 1469598103934665603ull;
@@ -465,7 +482,11 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
         }
     }
     if (g_in_vblank && g_ticks >= g_vblank_end) g_in_vblank = false;
-    if (g_ticks >= g_next_mcu) { io_board_run(); sound_run(); g_next_mcu = g_ticks + MCU_SLICE_TICKS; }
+    if (g_ticks >= g_next_mcu) {
+        { PerfTimer t(g_perf_io); io_board_run(); }
+        { PerfTimer t(g_perf_sound); sound_run(); }
+        g_next_mcu = g_ticks + MCU_SLICE_TICKS;
+    }
     if (g_ticks >= g_fifo_irq_at) { g_fifo_irq_at = UINT64_MAX; raise_irq(1u << 3); }
 
     // Deliver an interrupt if one is pending and the CPU accepts it:

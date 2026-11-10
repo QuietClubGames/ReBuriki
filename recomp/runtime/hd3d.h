@@ -25,6 +25,8 @@ struct HdTri {
 // Copy the triangles drawn since the 3D buffer was last cleared (= this frame's 3D picture)
 // for display. Called when a frame is finished, before the vblank clear.
 void video3d_hd_snapshot(void);
+// Triangles drawn since the last 3D clear (diagnostics).
+void video3d_live_tri_count(size_t* n);
 // The last snapshot, in draw order. Stays valid while the game is paused.
 const HdTri* video3d_hd_tris(size_t* count);
 // The 3D texture ROM (16 pages of 1024x1024 bytes) for uploading to the GPU.
