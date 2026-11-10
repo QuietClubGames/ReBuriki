@@ -511,3 +511,34 @@ player's PC from their own `buriki.zip` and `hng64.zip`.
   - Wrong sets give plain messages (not Buriki One; system ROMs missing; files missing).
 - **Not tested:** a normal interactive install (shortcuts, the Apps entry) and Uninstall, which
   need clicking through; and a slow or low-memory PC.
+
+## Silber, the hidden twelfth fighter (2026-11-10): found, not yet in our menu
+
+Read from the game's code and confirmed by running it. Addresses are for rev. B.
+
+- **The select screen** (`func_800A85A0`) calls `func_800BE9E4(13)`; non-zero gives 12 selectable
+  fighters instead of 11 (count at gp+0x27A8 = 0x800F3978; gp = 0x800F11D0). The twelfth slot,
+  blank when locked, becomes "ORIGINAL KARATE": Silber, Germany, rated HARD. He plays as a normal
+  player character (checked: selected by script, VS screen, a fight with his name on the bar).
+- **The flags** are one 16-bit word in the save memory at nvram offset 0x20F0 (pointer at
+  0x80144700 = 0xBF802000, +0xF0), cached at gp+0x27C0 with 0x4000 as the "loaded" marker.
+  Bits 0-10: one per normal fighter. Bit 13: Silber unlocked.
+  `func_800BE980(n)` sets bit n, and when bits 0-10 are all set it sets bit 13 as well.
+  `func_800BEA18(n)` clears a bit. Unlocked = 0x27FF in the file.
+- **Two ways the arcade sets them:**
+  1. `func_8000D454` sets the bit of the fighter in 0x800F71E5 when gp+0x2847 is non-zero. This
+     looks like "finished the game with that fighter", so clearing it with all eleven unlocks
+     Silber. Read from the code only: not confirmed by playing through.
+  2. A cheat code on the operator menu's COIN DATA > TOTAL COIN DATA screen (`func_800B5B74`,
+     table of 12 steps at cart 0x1DBA5C): **Up, Up, Down, Down, Left, Right, Left, Right, Start,
+     Start, R button, Start**. A wrong press starts it over. It sets all eleven bits, shows a
+     blinking "SILBER" box and plays a sound. Confirmed by script: nvram 0x20F0 became 27 FF.
+- Input word bits (0x800FF530 held / 0x800FF532 new presses): 1 up, 2 down, 4 left, 8 right,
+  0x10 L button (button 1), 0x20 R button (button 2), 0x40 / 0x80 buttons 3 / 4, 0x4000 start.
+- Other fighter variables: 0x80144691 / 0x80144693 are the two sides' fighters (the attract
+  demo picks them with random % 11, so Silber never appears in demos); gp+0x27AA is player 1's
+  select-screen cursor.
+- **Diagnostics added for this** (`hw.cpp`): `BURIKI_RAMDUMP=dir:f1,f2` saves main RAM
+  big-endian on those frames; `BURIKI_POKE=f0-f1:ADDR=VV;...` writes RAM bytes at the end of
+  each frame in a range (experiments only). The script control name for the Test button is
+  `test`.
