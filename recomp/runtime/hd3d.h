@@ -5,7 +5,8 @@
 #include <stdint.h>
 
 struct HdVert {
-    float x, y;     // window position in the 512x512 3D buffer (fractional, as MAME computes it)
+    float x, y;     // window position in the 512x512 3D buffer (fractional, as MAME computes it);
+                    // x can lie outside 0..512: polygons are kept for a view up to 4x wider (widescreen)
     float z;        // depth 0..1 (MAME window z; smaller = nearer, depth test is "less")
     float w;        // clip-space w (> 0 after clipping), for perspective-correct interpolation
     float s, t;     // texture coordinates (0..1 per 1024 texels, before scroll/page math)

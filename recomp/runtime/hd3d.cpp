@@ -14,7 +14,9 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -43,6 +45,7 @@ ID3D11RasterizerState* g_rs = nullptr;
 ID3D11DepthStencilState* g_dss_3d = nullptr;  ID3D11DepthStencilState* g_dss_off = nullptr;
 ID3D11BlendState* g_bs_off = nullptr;
 ID3D11SamplerState* g_samp_point = nullptr;  ID3D11SamplerState* g_samp_linear = nullptr;
+ID3D11SamplerState* g_samp_linear_clamp = nullptr;
 
 struct GpuVert {
     float x, y, z, w;          // buffer px, depth, clip w
@@ -52,19 +55,21 @@ struct GpuVert {
 
 struct Consts {
     float out_w, out_h, xscroll, enable3d;
-    uint32_t palbase, smooth_tex, smooth_2d, pad;
+    uint32_t palbase, smooth_tex, smooth_2d;
+    float wide;                // 1 = the arcade's 4:3 view; 4/3 = 16:9 (more of the scene at the sides)
+    float lay_m, lay_w, pad0, pad1;   // 2D layer textures: column of screen x = 0, texture width
 };
 
 const char* kShader3D = R"(
 Texture2DArray<uint> rom : register(t0);
 Texture2D<float4> pal : register(t1);
-cbuffer C : register(b0) { float out_w, out_h, xscroll, enable3d; uint palbase, smooth_tex, smooth_2d, cpad; };
+cbuffer C : register(b0) { float out_w, out_h, xscroll, enable3d; uint palbase, smooth_tex, smooth_2d; float wide; float lay_m, lay_w, cpad0, cpad1; };
 struct VI { float4 p : POS; float4 a : ATTR; uint4 q : PARAMS; };
 struct VO { float4 pos : SV_Position; float3 a : ATTR; nointerpolation uint4 q : PARAMS; };
 VO vs(VI i) {
     VO o;
     float w = i.p.w;
-    float nx = i.p.x / 256.0 - 1.0, ny = 1.0 - i.p.y / 256.0;
+    float nx = (i.p.x / 256.0 - 1.0) / wide, ny = 1.0 - i.p.y / 256.0;
     o.pos = float4(nx * w, ny * w, i.p.z * w, w);
     o.a = i.a.xyz;
     o.q = i.q;
@@ -136,7 +141,8 @@ Texture2D<float4> over : register(t1);
 Texture2D<float4> hd : register(t2);
 SamplerState sp : register(s0);
 SamplerState sl : register(s1);
-cbuffer C : register(b0) { float out_w, out_h, xscroll, enable3d; uint palbase, smooth_tex, smooth_2d, cpad; };
+SamplerState slc : register(s2);
+cbuffer C : register(b0) { float out_w, out_h, xscroll, enable3d; uint palbase, smooth_tex, smooth_2d; float wide; float lay_m, lay_w, cpad0, cpad1; };
 struct VO { float4 pos : SV_Position; float2 uv : UV; };
 VO vs(uint id : SV_VertexID) {
     VO o;
@@ -146,19 +152,23 @@ VO vs(uint id : SV_VertexID) {
     return o;
 }
 float4 ps(VO i) : SV_Target {
-    float2 uv = i.uv;                                   // 0..1 over the 512x448 picture
-    float3 b = smooth_2d ? below.Sample(sl, uv).rgb : below.Sample(sp, uv).rgb;
+    // i.uv: 0..1 over the output. uv: 0..1 over the arcade's 512x448 picture, which is the middle
+    // of the output in widescreen. The 2D layer textures hold lay_m extra columns on each side.
+    float2 uv = float2((i.uv.x - 0.5) * wide + 0.5, i.uv.y);
+    float2 uvc = float2((clamp(uv.x * 512.0, 0.5 - lay_m, 511.5 + lay_m) + lay_m) / lay_w, uv.y);
+    float3 b = smooth_2d ? below.Sample(sl, uvc).rgb : below.Sample(sp, uvc).rgb;
     float3 col = b;
     if (enable3d > 0.5) {
         // MAME: 3D buffer row = picture line * 512/448, column = x + xscroll (wrapping at 512)
-        float2 h = float2(frac((uv.x * 512.0 + xscroll) / 512.0), uv.y);
-        float4 c = hd.Sample(sl, h);
+        float4 c;
+        if (wide > 1.001) c = hd.Sample(slc, float2(i.uv.x + xscroll / (512.0 * wide), i.uv.y));
+        else c = hd.Sample(sl, float2(frac((uv.x * 512.0 + xscroll) / 512.0), uv.y));
         col = lerp(col, c.rgb, c.a);
     }
     // In-front 2D layer: alpha encodes how it combines with what's behind:
     // 1 = opaque, 0.75 = 50% blend, 0.5 = additive, 0 = nothing.
-    float4 o = over.Sample(sp, uv);
-    float3 oc = smooth_2d ? over.Sample(sl, uv).rgb : o.rgb;
+    float4 o = over.Sample(sp, uvc);
+    float3 oc = smooth_2d ? over.Sample(sl, uvc).rgb : o.rgb;
     if (o.a > 0.875) col = oc;
     else if (o.a > 0.625) col = lerp(col, oc, 0.5);
     else if (o.a > 0.25) col = saturate(col + oc);
@@ -211,7 +221,7 @@ void release_all() {
     g_rt_w = g_rt_h = g_rt_samples = 0;
     release(g_vs3d); release(g_ps3d); release(g_il3d); release(g_vsfs); release(g_pscomp);
     release(g_vb); g_vb_cap = 0; release(g_cb); release(g_rs); release(g_dss_3d); release(g_dss_off);
-    release(g_bs_off); release(g_samp_point); release(g_samp_linear);
+    release(g_bs_off); release(g_samp_point); release(g_samp_linear); release(g_samp_linear_clamp);
     g_dev = nullptr; g_ctx = nullptr;
 }
 
@@ -239,8 +249,8 @@ bool init_once() {
         if (FAILED(g_dev->CreateShaderResourceView(g_tex_rom, nullptr, &g_srv_rom))) return false;
     }
     if (!make_tex(256, 256, DXGI_FORMAT_B8G8R8A8_UNORM, true, &g_tex_pal, &g_srv_pal)) return false;
-    if (!make_tex(512, 448, DXGI_FORMAT_B8G8R8A8_UNORM, true, &g_tex_below, &g_srv_below)) return false;
-    if (!make_tex(512, 448, DXGI_FORMAT_B8G8R8A8_UNORM, true, &g_tex_over, &g_srv_over)) return false;
+    if (!make_tex(HD_LAYER_MAX_W, 448, DXGI_FORMAT_B8G8R8A8_UNORM, true, &g_tex_below, &g_srv_below)) return false;
+    if (!make_tex(HD_LAYER_MAX_W, 448, DXGI_FORMAT_B8G8R8A8_UNORM, true, &g_tex_over, &g_srv_over)) return false;
 
     ID3DBlob* b = compile(kShader3D, "vs", "vs_5_0");
     if (!b || FAILED(g_dev->CreateVertexShader(b->GetBufferPointer(), b->GetBufferSize(), nullptr, &g_vs3d))) return false;
@@ -282,11 +292,26 @@ bool init_once() {
     sd.MaxLOD = D3D11_FLOAT32_MAX;
     if (FAILED(g_dev->CreateSamplerState(&sd, &g_samp_point))) return false;
     sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = D3D11_TEXTURE_ADDRESS_BORDER; // widescreen: nothing beyond the 3D picture (border = 0,0,0,0)
+    if (FAILED(g_dev->CreateSamplerState(&sd, &g_samp_linear_clamp))) return false;
     sd.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;   // 3D buffer wraps horizontally (xscroll)
     if (FAILED(g_dev->CreateSamplerState(&sd, &g_samp_linear))) return false;
 
     g_failed = false;
     fprintf(stderr, "[hd] high-resolution renderer ready\n");
+    return true;
+}
+
+// Can this frame be shown wider than 4:3? Only the arena scenes (fights, style intros): a
+// perspective floor is on screen and every 3D polygon uses the whole screen as its window. Menus,
+// the title and the other flat screens were drawn for 4:3 and stay that shape.
+// Env BURIKI_WIDE_ALWAYS=1 widens everything (diagnostics).
+bool wide_scene(const HdLayers& L, const HdTri* tris, size_t ntri) {
+    static const bool force = getenv("BURIKI_WIDE_ALWAYS") != nullptr;
+    if (force) return true;
+    if (!L.arena) return false;
+    for (size_t i = 0; i < ntri; i++)
+        if (tris[i].clip_l > 0 || tris[i].clip_r < 512) return false;
     return true;
 }
 
@@ -309,21 +334,39 @@ bool ensure_targets(int w, int h, int samples) {
 
 bool hd_draw(ID3D11RenderTargetView* target, int vx, int vy, int vw, int vh) {
     if (!init_once()) return false;
+    video_set_wide_layers(fe_setting_aspect() == 3);   // (takes effect from the next frame drawn)
     HdLayers L;
     if (!video_hd_layers(&L)) return false;   // e.g. screen disabled: use the normal picture
+
+    size_t ntri = 0;
+    const HdTri* tris = video3d_hd_tris(&ntri);
+
+    // Widescreen (Picture shape): the front end hands over an area wider than 4:3. `wide` is how
+    // many times wider than the arcade picture the 3D view becomes; the 2D layers stay in the
+    // middle. Screens that aren't a full-screen 3D scene keep the arcade shape, centred.
+    float wide = 1.0f;
+    if (fe_setting_aspect() == 3 && vh > 0) {
+        const float k = ((float)vw / (float)vh) / (4.0f / 3.0f);
+        if (k > 1.001f && L.margin > 0 && wide_scene(L, tris, ntri)) wide = std::min(k, 1.0f + L.margin / 256.0f);
+        else {                                   // 4:3 in the middle of the wide area
+            const int w43 = vh * 4 / 3;
+            if (w43 < vw) { vx += (vw - w43) / 2; vw = w43; }
+        }
+    }
 
     // 3D target: the 512x512 buffer covers the picture width and 512/448 of its height.
     // Quality Auto = the output resolution; presets = a fixed multiple of the arcade's 512 lines.
     const int q = fe_setting_quality_scale();
-    const int rw = q ? 512 * q : vw, rh = q ? 512 * q : (int)(vh * 512.0f / 448.0f + 0.5f);
+    const int rw = q ? (int)(512 * q * wide + 0.5f) : vw, rh = q ? 512 * q : (int)(vh * 512.0f / 448.0f + 0.5f);
     if (rw < 64 || rh < 64 || !ensure_targets(rw, rh, 4)) return false;
 
     upload(g_tex_pal, L.pal_3d, 256 * 4, 256);
-    upload(g_tex_below, L.below, 512 * 4, 448);
-    upload(g_tex_over, L.over, 512 * 4, 448);
+    upload(g_tex_below, L.below, L.width * 4, 448);
+    upload(g_tex_over, L.over, L.width * 4, 448);
 
     // Enhanced mode smooths 3D textures; the 2D layers follow the screen filter (Smooth = bilinear).
-    Consts c = {(float)vw, (float)vh, (float)L.xscroll, L.enable3d ? 1.0f : 0.0f, L.palbase, 1u, (uint32_t)(fe_setting_filter() == 1), 0};
+    Consts c = {(float)vw, (float)vh, (float)L.xscroll, L.enable3d ? 1.0f : 0.0f, L.palbase, 1u, (uint32_t)(fe_setting_filter() == 1), wide,
+                (float)L.margin, (float)HD_LAYER_MAX_W, 0, 0};
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(g_ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &c, sizeof(c)); g_ctx->Unmap(g_cb, 0); }
 
@@ -331,8 +374,6 @@ bool hd_draw(ID3D11RenderTargetView* target, int vx, int vy, int vw, int vh) {
     const float clear0[4] = {0, 0, 0, 0};
     g_ctx->ClearRenderTargetView(g_rtv_ms, clear0);
     g_ctx->ClearDepthStencilView(g_dsv_ms, D3D11_CLEAR_DEPTH, 1.0f, 0);
-    size_t ntri = 0;
-    const HdTri* tris = video3d_hd_tris(&ntri);
     if (L.enable3d && ntri) {
         std::vector<GpuVert> verts(ntri * 3);
         for (size_t i = 0; i < ntri; i++) {
@@ -373,16 +414,19 @@ bool hd_draw(ID3D11RenderTargetView* target, int vx, int vy, int vw, int vh) {
         ID3D11ShaderResourceView* srvs[2] = {g_srv_rom, g_srv_pal};
         g_ctx->PSSetShaderResources(0, 2, srvs);
         g_ctx->PSSetConstantBuffers(0, 1, &g_cb);
+        g_ctx->VSSetConstantBuffers(0, 1, &g_cb);
 
         // Draw in order, one call per run of triangles sharing a clip rectangle.
-        const float sx = rw / 512.0f, sy = rh / 512.0f;
+        // buffer x 256 is the middle of the target; 512 buffer pixels span rw / wide
+        const float sx = rw / (512.0f * wide), sy = rh / 512.0f, x0 = rw * 0.5f - 256.0f * sx;
         size_t start = 0;
         while (start < ntri) {
             size_t end = start + 1;
             const HdTri& a = tris[start];
             while (end < ntri && tris[end].clip_l == a.clip_l && tris[end].clip_r == a.clip_r &&
                    tris[end].clip_t == a.clip_t && tris[end].clip_b == a.clip_b) end++;
-            D3D11_RECT r = {(LONG)(a.clip_l * sx), (LONG)(a.clip_t * sy), (LONG)((a.clip_r + 1) * sx), (LONG)((a.clip_b + 1) * sy)};
+            D3D11_RECT r = {(LONG)(x0 + a.clip_l * sx), (LONG)(a.clip_t * sy), (LONG)(x0 + (a.clip_r + 1) * sx), (LONG)((a.clip_b + 1) * sy)};
+            if (a.clip_l <= 0 && a.clip_r >= 512) { r.left = 0; r.right = rw; }   // full-screen view: the whole width
             g_ctx->RSSetScissorRects(1, &r);
             g_ctx->Draw((UINT)((end - start) * 3), (UINT)(start * 3));
             start = end;
@@ -406,8 +450,8 @@ bool hd_draw(ID3D11RenderTargetView* target, int vx, int vy, int vw, int vh) {
     g_ctx->PSSetShader(g_pscomp, nullptr, 0);
     ID3D11ShaderResourceView* srvs[3] = {g_srv_below, g_srv_over, g_srv_res};
     g_ctx->PSSetShaderResources(0, 3, srvs);
-    ID3D11SamplerState* samps[2] = {g_samp_point, g_samp_linear};
-    g_ctx->PSSetSamplers(0, 2, samps);
+    ID3D11SamplerState* samps[3] = {g_samp_point, g_samp_linear, g_samp_linear_clamp};
+    g_ctx->PSSetSamplers(0, 3, samps);
     g_ctx->PSSetConstantBuffers(0, 1, &g_cb);
     g_ctx->Draw(3, 0);
     ID3D11ShaderResourceView* none[3] = {nullptr, nullptr, nullptr};

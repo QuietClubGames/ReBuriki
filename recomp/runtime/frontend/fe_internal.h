@@ -49,6 +49,15 @@ static inline void picture_rect(int cw, int ch, int* x, int* y, int* w, int* h) 
     *y = (ch - *h) / 2;
 }
 
+// Widescreen (ASPECT_WIDE): the area handed to the high-resolution renderer. As tall as the 4:3 picture and
+// as wide as the window allows, up to 21:9. (picture_rect() still gives the 4:3 area for everything else.)
+static inline void picture_rect_wide(int cw, int ch, int* x, int* y, int* w, int* h) {
+    picture_rect(cw, ch, x, y, w, h);
+    int ww = *h * 64 / 27;                           // 21:9
+    if (ww > cw) ww = cw;
+    if (ww > *w) { *w = ww; *x = (cw - ww) / 2; }
+}
+
 // ---- overlay renderer (fe_ui_d3d11.cpp) ----
 void ui_d3d_render(int w, int h);
 void ui_d3d_release(void);
@@ -57,6 +66,7 @@ extern float g_ui_fps;
 
 // ---- window (fe_window.cpp) ----
 void video_apply_display(int mode, int window_size, int monitor);   // DISPLAY_*
+void video_window_size(int index, int* w, int* h);                 // client size of a window-size choice, for the picture shape in use
 int  video_monitor_count(void);
 const char* video_monitor_name(int index);
 int  video_pop_key(void);              // next queued key press: VK code, | KEY_REPEAT for auto-repeat; 0 if none

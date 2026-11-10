@@ -21,15 +21,16 @@ static int g_capture = -1;
 static float g_capture_t;
 
 // ---------------------------------------------------------------- settings
-static int g_applied_display = -1, g_applied_size = -1, g_applied_monitor = -1, g_applied_pacing = -1;
+static int g_applied_display = -1, g_applied_size = -1, g_applied_monitor = -1, g_applied_pacing = -1, g_applied_wide = -1;
 
 static void apply(int save) {
     if (g_settings.display_mode != g_applied_display || g_settings.window_size != g_applied_size ||
-        g_settings.monitor != g_applied_monitor) {
+        g_settings.monitor != g_applied_monitor || (g_settings.aspect == ASPECT_WIDE) != g_applied_wide) {   // widescreen: a 16:9 window
         video_apply_display(g_settings.display_mode, g_settings.window_size, g_settings.monitor);
         g_applied_display = g_settings.display_mode;
         g_applied_size = g_settings.window_size;
         g_applied_monitor = g_settings.monitor;
+        g_applied_wide = g_settings.aspect == ASPECT_WIDE;
     }
     if (g_settings.pacing != g_applied_pacing) { video_set_pacing(g_settings.pacing); g_applied_pacing = g_settings.pacing; }
     g_aspect_mode = g_settings.aspect;

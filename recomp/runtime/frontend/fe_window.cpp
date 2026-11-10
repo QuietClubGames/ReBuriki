@@ -110,6 +110,12 @@ const char* video_monitor_name(int i) { if (!g_nmons) list_monitors(); return i 
 // ---------------------------------------------------------------- display mode
 static const int k_sizes[][2] = {{640, 480}, {960, 720}, {1195, 896}, {1280, 960}, {1600, 1200}, {1792, 1344}};
 static const int k_nsizes = (int)(sizeof k_sizes / sizeof k_sizes[0]);
+// With the widescreen picture shape the window is 16:9 at the same height.
+void video_window_size(int index, int* w, int* h) {
+    if (index < 0 || index >= k_nsizes) index = 2;
+    *w = k_sizes[index][0]; *h = k_sizes[index][1];
+    if (g_settings.aspect == ASPECT_WIDE) *w = (*h * 16 / 9 + 1) & ~1;
+}
 static bool g_reclaim_exclusive;
 static int g_mode = -1;              // DISPLAY_*
 static bool g_fullscreen;
@@ -142,7 +148,8 @@ void video_apply_display(int mode, int window_size, int monitor) {
     if (g_mode == DISPLAY_EXCLUSIVE && mode != DISPLAY_EXCLUSIVE && g_use_d3d) d3d_set_exclusive(0, nullptr);
     if (mode == DISPLAY_WINDOW) {
         if (g_mode == DISPLAY_WINDOW) { GetWindowRect(g_wnd, &g_window_rect); g_have_window_rect = true; }
-        int w = k_sizes[window_size][0], h = k_sizes[window_size][1];
+        int w, h;
+        video_window_size(window_size, &w, &h);
         place_window(w, h, mon, g_mode == DISPLAY_WINDOW && g_have_window_rect && monitor == 0);
         g_fullscreen = false;
         fe_log("video: window %dx%d", w, h);
@@ -228,7 +235,9 @@ void fe_window_open(void) {
     wc.lpszClassName = "BurikiRecomp";
     RegisterClassA(&wc);
     int ws = g_settings.window_size >= 0 && g_settings.window_size < k_nsizes ? g_settings.window_size : 2;
-    RECT r = {0, 0, k_sizes[ws][0], k_sizes[ws][1]};
+    int ww0, wh0;
+    video_window_size(ws, &ww0, &wh0);
+    RECT r = {0, 0, ww0, wh0};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
     g_wnd = CreateWindowA("BurikiRecomp", "Buriki One", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                           r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
@@ -241,7 +250,12 @@ void fe_window_open(void) {
     pad_init();
     menu_host_init();                // applies the settings (full screen, filter, pacing...)
     if (g_opt.scale > 0 && g_settings.display_mode == DISPLAY_WINDOW)      // --scale N for this run
-        place_window(448 * g_opt.scale * 4 / 3, 448 * g_opt.scale, MonitorFromWindow(g_wnd, MONITOR_DEFAULTTONEAREST), false);
+        place_window(448 * g_opt.scale * (g_settings.aspect == ASPECT_WIDE ? 16 : 12) / 9, 448 * g_opt.scale, MonitorFromWindow(g_wnd, MONITOR_DEFAULTTONEAREST), false);
+    if (const char* e = getenv("BURIKI_WINDOW")) {      // tests: BURIKI_WINDOW=WxH, any window shape
+        int w = 0, h = 0;
+        if (sscanf(e, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240 && g_settings.display_mode == DISPLAY_WINDOW)
+            place_window(w, h, MonitorFromWindow(g_wnd, MONITOR_DEFAULTTONEAREST), false);
+    }
     if (!g_use_d3d) fe_log("video: the menu needs Direct3D 11; without it Esc does nothing and closing the window quits");
 }
 
@@ -442,6 +456,11 @@ static void one_frame(const uint32_t* rgb, int w, int h) {
     }
     last_fps = now;
     menu_test_tick();
+    if (g_opt.shot_every && g_use_d3d && hw_frame_number() % g_opt.shot_every == 0) {   // --shot-every (tests)
+        static char shot[MAX_PATH];
+        snprintf(shot, sizeof shot, "%s/shot_%05u.bmp", g_opt.shot_dir ? g_opt.shot_dir : ".", hw_frame_number());
+        d3d_request_backbuffer_save(shot);
+    }
 }
 
 void fe_present_frame(const uint32_t* rgb, int w, int h) {

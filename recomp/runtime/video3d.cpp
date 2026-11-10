@@ -45,7 +45,12 @@ struct polygon {
     u16 colorIndex = 0;
     u16 texscrollx = 0, texscrolly = 0;
     u16 tex_mask_x = 1024, tex_mask_y = 1024;
+    // The same polygon for the high-resolution renderer: clipped to a view HD_WIDE_CLIP times
+    // wider than the screen (the GPU clips to what it shows), so widescreen has the sides.
+    int hdn = 0;
+    HdVert hd[10]{};
 };
+const float HD_WIDE_CLIP = 4.0f;
 
 const int HNG64_MAX_POLYGONS = 10000;
 std::vector<polygon> m_polys(HNG64_MAX_POLYGONS);
@@ -278,17 +283,13 @@ void render_triangle(const RVert& _v1, const RVert& _v2, const RVert& _v3, const
     }
 }
 
-// Record a polygon (as a fan) for the high-resolution renderer, before the software rasteriser
-// modifies its vertices. Same vertices, same order, same clip rectangle.
+// Record a polygon (as a fan) for the high-resolution renderer: its wide-clipped copy, with the
+// same order and clip rectangle as the software rasteriser uses.
 void record_hd(const polygon* p) {
-    if (p->n < 3 || g_hd_tris.size() > 200000) return;
-    for (int j = 1; j < p->n - 1; j++) {
+    if (p->hdn < 3 || g_hd_tris.size() > 200000) return;
+    for (int j = 1; j < p->hdn - 1; j++) {
         HdTri t{};
-        const polyVert* src[3] = {&p->vert[0], &p->vert[j], &p->vert[j + 1]};
-        for (int k = 0; k < 3; k++) {
-            t.v[k] = {src[k]->clipCoords[0], src[k]->clipCoords[1], src[k]->clipCoords[2], src[k]->clipCoords[3],
-                      src[k]->texCoords[0], src[k]->texCoords[1], src[k]->light};
-        }
+        t.v[0] = p->hd[0]; t.v[1] = p->hd[j]; t.v[2] = p->hd[j + 1];
         t.flat = p->flatShade;
         t.tex4bpp = p->tex4bpp; t.texIndex = p->texIndex; t.blend = p->blend;
         t.texPageSmall = p->texPageSmall; t.colorIndex = p->colorIndex; t.palOffset = p->palOffset;
@@ -515,6 +516,7 @@ void recoverPolygonBlock(const u16* packet, int& numPolys) {
             }
 
             currentPoly.visible = true;
+            currentPoly.hdn = 0;
             lastPoly = currentPoly;
 
             setIdentity(m_modelViewMatrix);
@@ -555,6 +557,18 @@ void recoverPolygonBlock(const u16* packet, int& numPolys) {
                     clipVerts[m] = {currentPoly.vert[m].clipCoords[0], currentPoly.vert[m].clipCoords[1],
                                     currentPoly.vert[m].clipCoords[2], currentPoly.vert[m].clipCoords[3],
                                     {currentPoly.vert[m].texCoords[0], currentPoly.vert[m].texCoords[1], currentPoly.vert[m].light, 0, 0}};
+                }
+                {   // the copy for the high-resolution renderer, clipped to the wider view
+                    ClipVert hv[10];
+                    for (int m = 0; m < currentPoly.n; m++) { hv[m] = clipVerts[m]; hv[m].x *= 1.0f / HD_WIDE_CLIP; }
+                    const int hn = frustum_clip_all(hv, currentPoly.n);
+                    currentPoly.hdn = hn;
+                    for (int m = 0; m < hn; m++) {
+                        const float w = hv[m].w;
+                        currentPoly.hd[m] = {(hv[m].x * HD_WIDE_CLIP / w + 1.0f) * (512.0f / 2.0f) + g_view_offx,
+                                             512.0f - (hv[m].y / w + 1.0f) * (512.0f / 2.0f) + g_view_offy,
+                                             (hv[m].z / w + 1.0f) * 0.5f, w, hv[m].p[0], hv[m].p[1], hv[m].p[2]};
+                    }
                 }
                 const int num_vertices = frustum_clip_all(clipVerts, currentPoly.n);
                 currentPoly.n = num_vertices;

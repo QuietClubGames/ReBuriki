@@ -192,12 +192,28 @@ bool g_layers_ok = false;
 u32* g_draw = g_bitmap;        // where tilemaps and sprites draw
 bool g_over_mode = false;      // drawing into g_over
 
+// Widescreen: the same two layers with WIDE_M more columns on each side. The tilemaps are far
+// bigger than the screen (1024 pixels or more) and the hardware just shows a 512-pixel window of
+// them, so the extra columns come from the same maths carried on past the screen edges. Columns
+// WIDE_M .. WIDE_M+511 are exactly the normal picture.
+constexpr int WIDE_M = HD_WIDE_MARGIN, WIDE_W = HD_LAYER_MAX_W;
+u32 g_below_w[WIDE_W * VIDEO_H];
+u32 g_over_w[WIDE_W * VIDEO_H];
+bool g_wide_wanted = false;    // set by the high-resolution renderer (video_set_wide_layers)
+bool g_layers_wide = false;    // this frame's layers are the wide ones
+bool g_arena = false;          // this frame has a perspective ("floor" mode) tilemap
+// Geometry of the buffer g_draw points at: row length, the column of screen x = 0, and how many
+// columns beyond the visible area are drawn on each side.
+int g_stride = VIDEO_W, g_xoff = 0, g_ext = 0;
+int g_spr_ext = 0;             // the same margin for the sprite buffer
+
 constexpr u32 OVER_OPAQUE = 0xFF000000u, OVER_HALF = 0xC0000000u, OVER_ADD = 0x80000000u;
 
 // mode 1 = opaque, 2 = additive, 3 = 50% blend (MAME HNG64_ROZ_PLOT_PIXEL / mixsprites).
 inline void plot(u32* d, u32 c, int mode);
-u16 m_sprite_bitmap[VIDEO_W * VIDEO_H];
-u16 m_sprite_zbuffer[VIDEO_W * VIDEO_H];
+// (always WIDE_W columns; screen x = 0 is column WIDE_M)
+u16 m_sprite_bitmap[WIDE_W * VIDEO_H];
+u16 m_sprite_zbuffer[WIDE_W * VIDEO_H];
 
 inline void plot(u32* d, u32 c, int mode) {
     if (!g_over_mode) {
@@ -274,6 +290,19 @@ inline bool tilemap_pixel(int tm, const TilemapKind& k, u32 px, u32 py, u16& pen
     if (p == 0) return false;                  // transparent pen 0
     pen = (u16)(tc.colorbase + p);
     return true;
+}
+
+// The palette a tilemap layer is drawn with: plain, or through one of the two fade registers
+// (see the note on the fade register choice in tilemap_draw_roz_core_line).
+const u32* tilemap_clut(int tm) {
+    static const bool mame_fade = getenv("BURIKI_MAME_FADE") != nullptr;
+    if ((get_tileregs(tm) >> 7) & 1) {
+        const bool l1 = (get_tileregs(tm) >> 5) & 1;
+        const u32 sel = mame_fade ? 0x1u : (m_tcram[0x14 / 4] >> 16);
+        const bool use_fade1 = l1 ? ((sel >> 1) & 1) : (sel & 1);
+        return use_fade1 ? pal_fade1 : pal_fade0;
+    }
+    return pal_main;
 }
 
 void tilemap_draw_roz_core_line(const Rect& cliprect, int tm, const TilemapKind& k, int wraparound,
@@ -365,30 +394,26 @@ void tilemap_draw_roz_core_line(const Rect& cliprect, int tm, const TilemapKind&
     //    black there, and with them hidden what's left (title, portrait, 3D fighter: sprites
     //    and 3D) is the intended composition. MAME's mapping leaves the arena showing.
     // With 0001 this is identical to MAME. Env BURIKI_MAME_FADE=1 restores MAME's mapping.
-    static const bool mame_fade = getenv("BURIKI_MAME_FADE") != nullptr;
-    const u32* clut;
-    if ((get_tileregs(tm) >> 7) & 1) {
-        const bool l1 = (get_tileregs(tm) >> 5) & 1;
-        const u32 sel = mame_fade ? 0x1u : (m_tcram[0x14 / 4] >> 16);
-        const bool use_fade1 = l1 ? ((sel >> 1) & 1) : (sel & 1);
-        clut = use_fade1 ? pal_fade1 : pal_fade0;
-    }
-    else clut = pal_main;
+    const u32* clut = tilemap_clut(tm);
 
     const u32 width = k.cols * k.tile_w, height = k.rows * k.tile_h;
     const u32 xmask = width - 1, ymask = height - 1;
     const u32 widthshifted = width << 16, heightshifted = height << 16;
 
-    startx += cliprect.min_x * incxx + source_line_to_use * incyx;
-    starty += cliprect.min_x * incxy + source_line_to_use * incyy;
+    // (unsigned: the widescreen margin makes min_x negative, and these wrap like the hardware's counters)
+    startx += (u32)cliprect.min_x * (u32)incxx + (u32)source_line_to_use * (u32)incyx;
+    starty += (u32)cliprect.min_x * (u32)incxy + (u32)source_line_to_use * (u32)incyy;
 
-    u32* dest = &g_draw[cliprect.min_y * VIDEO_W + cliprect.min_x];
+    u32* dest = &g_draw[cliprect.min_y * g_stride + g_xoff + cliprect.min_x];
     u32 cx = startx, cy = starty;
-    int mosaic_counter = 0;
+    // Mosaic blocks are counted from screen x = 0: when the line starts in the widescreen margin,
+    // skip to the first block boundary so the blocks on screen stay where they are.
+    int mosaic_counter = cliprect.min_x < 0 ? (-cliprect.min_x) % (mosaic + 1) : 0;
     bool opaque = false;
     u16 datasrc = 0;
     TileCache tc;
     for (int x = cliprect.min_x; x <= cliprect.max_x; x++, dest++, cx += incxx, cy += incxy) {
+        if (x == 0 && cliprect.min_x < 0) mosaic_counter = 0;   // on screen: exactly as without the margin
         u32 sx, sy;
         if (wraparound) { sx = (cx >> 16) & xmask; sy = (cy >> 16) & ymask; }
         else {
@@ -421,10 +446,11 @@ void draw_tilemap(int tm, int line) {
     const TilemapKind& k = global_dimensions == 0 ? (big ? TM_16x16 : TM_8x8) : (big ? TM_16x16_ALT : TM_8x8);
     Rect clip = g_visarea;
     clip.min_y = clip.max_y = line;
+    clip.min_x -= g_ext; clip.max_x += g_ext;      // widescreen margins (0 normally)
     if (m_videoregs[0x00] & 1) {   // "split" mode: two halves with different scroll offsets
-        Rect r = clip; r.min_x = 256; r.max_x = std::min(511, g_visarea.max_x);
+        Rect r = clip; r.min_x = 256; r.max_x = std::min(511, g_visarea.max_x) + g_ext;
         tilemap_draw_roz_core_line(r, tm, k, wrap, get_blend_mode(tm), 0x80, mosaic, 1);
-        r.min_x = 0; r.max_x = 255;
+        r.min_x = -g_ext; r.max_x = 255;
         tilemap_draw_roz_core_line(r, tm, k, wrap, get_blend_mode(tm), 0x80, mosaic, 2);
     } else {
         tilemap_draw_roz_core_line(clip, tm, k, wrap, get_blend_mode(tm), 0x80, mosaic, 0);
@@ -459,8 +485,8 @@ void zoom_transpen(int gfxn, u32 code, u32 color, int flipx, int flipy, s32 xpos
     s32 cursrcx = 0;
     if (flipx) { cursrcx = (dstwidth - 1) * dx; dx = -dx; }
     const int row = flipy ? ((15 - curyy) & 0xf) : (curyy & 0xf);
-    u16* destptr = &m_sprite_bitmap[ypos * VIDEO_W];
-    u16* destzptr = &m_sprite_zbuffer[ypos * VIDEO_W];
+    u16* destptr = &m_sprite_bitmap[ypos * WIDE_W + WIDE_M];
+    u16* destzptr = &m_sprite_zbuffer[ypos * WIDE_W + WIDE_M];
 
     for (s32 curx = 0; curx < (s32)dstwidth; curx++, cursrcx += dx) {
         const int xdrawpos = xpos + curx;
@@ -472,7 +498,7 @@ void zoom_transpen(int gfxn, u32 code, u32 color, int flipx, int flipy, s32 xpos
             else          { if (ypos & 1) srcpix = 0; }
         }
         const u16 pix = srcpix;
-        if (xdrawpos > g_visarea.max_x || xdrawpos < g_visarea.min_x) continue;
+        if (xdrawpos > g_visarea.max_x + g_spr_ext || xdrawpos < g_visarea.min_x - g_spr_ext) continue;
         if (zrev ? (zval >= destzptr[xdrawpos]) : (zval < destzptr[xdrawpos])) {
             if (pix != 0) { destzptr[xdrawpos] = (u16)zval; destptr[xdrawpos] = (u16)(color + pix); }
         }
@@ -583,9 +609,9 @@ void draw_sprites_buffer() {
 
 void mixsprites_test(u16 priority, int y) {
     const u8 spriteblendtype = (m_tcram[0x4c / 4] >> 16) & 1;
-    const u16* src = &m_sprite_bitmap[y * VIDEO_W];
-    u32* dst = &g_draw[y * VIDEO_W];
-    for (int x = g_visarea.min_x; x <= g_visarea.max_x; x++) {
+    const u16* src = &m_sprite_bitmap[y * WIDE_W + WIDE_M];
+    u32* dst = &g_draw[y * g_stride + g_xoff];
+    for (int x = g_visarea.min_x - g_ext; x <= g_visarea.max_x + g_ext; x++) {
         const u16 srcpix = src[x];
         if ((srcpix & 0x0fff) && (srcpix & 0x7000) == priority) {
             if (srcpix & 0x8000) plot(&dst[x], pal_main[srcpix & 0x0fff], spriteblendtype ? 3 : 2);
@@ -709,6 +735,10 @@ void draw_front_line(int y) {
 
 void draw_front_layers() { g_lines.run(g_visarea.min_y, g_visarea.max_y, draw_front_line); }
 
+// Draw into one of the wide layers / back into the normal picture.
+void draw_to_wide(u32* buf) { g_draw = buf; g_stride = WIDE_W; g_xoff = WIDE_M; g_ext = WIDE_M; }
+void draw_to_picture() { g_draw = g_bitmap; g_stride = VIDEO_W; g_xoff = 0; g_ext = 0; g_over_mode = false; }
+
 void screen_update(bool split) {
     g_layers_ok = false;
     update_visarea();
@@ -717,8 +747,40 @@ void screen_update(bool split) {
     for (auto& p : g_bitmap) p = fill;
     if (m_screen_dis) return;
 
+    // Widescreen layers: only when the picture uses the whole screen width.
+    const bool wide = split && g_wide_wanted && g_visarea.min_x == 0 && g_visarea.max_x == VIDEO_W - 1;
+    g_layers_wide = wide;
+    g_spr_ext = wide ? WIDE_M : 0;
+    // An arena scene: a perspective floor (an enabled tilemap in line mode) that isn't faded to
+    // black. (On the style-intro screens the arena is there but blacked out, and the opponent
+    // waits just off screen: those keep the arcade shape.)
+    g_arena = false;
+    for (int j = 0; j < 4; j++) {
+        const u16 r = get_tileregs(j);
+        if (!((r >> 6) & 1) || ((r >> 11) & 1) || (m_videoregs[0x00] & 0x00010000)) continue;
+        const u32* clut = tilemap_clut(j);
+        for (int i = 0; i < 0x1000 && !g_arena; i++) if (clut[i]) g_arena = true;
+    }
+
     draw_sprites_buffer();
     if ((m_tcram[0x24 / 4] >> 17) & 1) return;
+
+    if (wide) {
+        // The back layers once, wide; the normal picture starts as their middle 512 columns.
+        for (auto& p : g_below_w) p = fill;
+        draw_to_wide(g_below_w);
+        g_lines.run(g_visarea.min_y, g_visarea.max_y, draw_back_line);
+        draw_to_picture();
+        for (int y = 0; y < VIDEO_H; y++) memcpy(&g_bitmap[y * VIDEO_W], &g_below_w[y * WIDE_W + WIDE_M], VIDEO_W * sizeof(u32));
+        draw_3d_layer();
+        draw_front_layers();
+        memset(g_over_w, 0, sizeof(g_over_w));
+        draw_to_wide(g_over_w); g_over_mode = true;
+        draw_front_layers();
+        draw_to_picture();
+        g_layers_ok = true;
+        return;
+    }
 
     g_lines.run(g_visarea.min_y, g_visarea.max_y, draw_back_line);
     if (split) memcpy(g_below, g_bitmap, sizeof(g_below));
@@ -876,10 +938,15 @@ void log_video_state() {
     memcpy(last, cur, sizeof(cur));
 }
 
+void video_set_wide_layers(bool on) { g_wide_wanted = on; }
+
 bool video_hd_layers(HdLayers* out) {
     if (!g_layers_ok) return false;
-    out->below = g_below;
-    out->over = g_over;
+    out->width = g_layers_wide ? WIDE_W : VIDEO_W;
+    out->margin = g_layers_wide ? WIDE_M : 0;
+    out->arena = g_arena;
+    out->below = g_layers_wide ? g_below_w : g_below;
+    out->over = g_layers_wide ? g_over_w : g_over;
     out->pal_3d = pal_3d;
     out->palbase = ((m_tcram[0x4c / 4] >> 16) & 1) ? 0x800 : 0x000;
     int xscroll = (m_fbscroll0() >> 21);

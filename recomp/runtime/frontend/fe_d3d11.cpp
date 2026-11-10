@@ -375,8 +375,11 @@ int d3d_present(const uint32_t* rgb, int w, int h) {
     // the high-resolution renderer, if one is plugged in and wanted
     bool hd = false;
     if (g_hd_draw && g_settings.enhanced && pw > 0 && ph > 0) {
-        hd = g_hd_draw(rtv, px, py, pw, ph);
+        int hx = px, hy = py, hw = pw, hh = ph;
+        if (g_aspect_mode == ASPECT_WIDE) picture_rect_wide(buf_w, buf_h, &hx, &hy, &hw, &hh);
+        hd = g_hd_draw(rtv, hx, hy, hw, hh);
         ctx->OMSetRenderTargets(1, &rtv, nullptr);
+        if (hd) { px = hx; py = hy; pw = hw; ph = hh; }     // the filters below cover what was drawn
     }
     if (!hd) {
         if (!ensure_texture(tex, srv, tex_w, tex_h, w, h, true)) return 0;

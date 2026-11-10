@@ -94,9 +94,18 @@ static void set_region(int v) {
 static int region_pending(void) { return g_settings.region != H->running_region(); }
 
 static const char* const k_mode[] = {"Window", "Borderless full screen", "Exclusive full screen"};
-static const char* const k_winsize[] = {"640\xC3\x97" "480", "960\xC3\x97" "720", "1195\xC3\x97" "896  (2\xC3\x97 lines)",
-                                        "1280\xC3\x97" "960", "1600\xC3\x97" "1200", "1792\xC3\x97" "1344  (3\xC3\x97 lines)"};
-static const char* const k_aspect[] = {"Arcade 4:3", "Stretch to fill", "4:3, whole-number scale"};
+// window sizes: the list is in fe_window.cpp (widescreen makes each one 16:9 at the same height)
+void video_window_size(int index, int* w, int* h);
+static int count_winsizes(void) { return 6; }
+static const char* name_winsize(int i) {
+    static char names[6][48];
+    int w = 0, h = 0;
+    if (i < 0 || i >= 6) return "?";
+    video_window_size(i, &w, &h);
+    snprintf(names[i], sizeof names[i], "%d\xC3\x97%d%s", w, h, h == 896 ? "  (2\xC3\x97 lines)" : h == 1344 ? "  (3\xC3\x97 lines)" : "");
+    return names[i];
+}
+static const char* const k_aspect[] = {"Arcade 4:3", "Stretch to fill", "4:3, whole-number scale", "Widescreen"};
 static const char* const k_graphics[] = {"Enhanced", "Original arcade"};
 static const char* const k_quality[] = {"Auto (keeps 60 fps)", "Performance  2\xC3\x97", "Balanced  3\xC3\x97",
                                         "High  4\xC3\x97", "Ultra  6\xC3\x97", "Extreme  8\xC3\x97"};
@@ -136,9 +145,9 @@ static const char* name_gpu(int i) { return i == 0 ? "Automatic (fastest)" : H->
 
 static const Item k_display[] = {
     CHOICE("Display mode", "Borderless keeps alt-tab instant. Exclusive takes over the monitor. Alt+Enter / F11 also switch.", get_display_mode, set_display_mode, k_mode, nullptr),
-    CHOICE("Window size", "Size of the window when not in full screen.", get_window_size, set_window_size, k_winsize, windowed),
+    DCHOICE("Window size", "Size of the window when not in full screen.", get_window_size, set_window_size, count_winsizes, name_winsize, windowed),
     DCHOICE("Monitor", "Which display to use for full screen (and to place the window on).", get_monitor, set_monitor, count_monitors, name_monitor, nullptr),
-    CHOICE("Picture shape", "The arcade monitor was 4:3. Whole-number scaling keeps every line of the 448 the same height.", get_aspect, set_aspect, k_aspect, nullptr),
+    CHOICE("Picture shape", "The arcade monitor was 4:3. Widescreen shows more of the arena at the sides in fights (needs Enhanced graphics).", get_aspect, set_aspect, k_aspect, nullptr),
     CHOICE("Graphics", "Enhanced redraws the 3D on your graphics card at high resolution. F9 switches while playing.", get_graphics, set_graphics, k_graphics, nullptr),
     CHOICE("Quality", "Auto picks the sharpest setting your PC can hold at full speed and steps down if it ever can't.", get_quality, set_quality, k_quality, enhanced_on),
     CHOICE("Screen filter", "Sharp pixels, smooth scaling, or arcade-monitor scanlines.", get_filter, set_filter, k_filter, nullptr),

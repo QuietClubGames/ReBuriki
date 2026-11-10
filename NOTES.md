@@ -300,7 +300,7 @@ the window's resolution; the presets render the 512x512 buffer at 2x-8x.
   mode, and whenever the screen can't be split (screen off).
 - **Checked:** the intro and the how-to-play screen (viewport + offset) match the software
   picture's layout, with smooth 3D edges and textures. Full 59 fps either way on an RTX 5070 Ti.
-- **Not done yet:** widescreen. (Menu art: done, see "Menu art" below.)
+- Widescreen and menu art: done, see "Widescreen" and "Menu art" below.
 
 ## Review, 2026-11-10
 
@@ -341,7 +341,7 @@ Other gaps:
 - The I/O board's serial EEPROM uses MAME's dualport 0x600 hack.
 - Sound: the rear/sub outputs and the L7A1045 delay effect aren't implemented (MAME doesn't
   have them either).
-- Widescreen, an installer/release package, and a README for players.
+- An installer/release package, and a README for players.
 
 ## Roadmap
 
@@ -409,3 +409,44 @@ screens, a different one each time it opens (shuffled rounds, never the same twi
   - `uip_art_next()` runs on each menu open;
   - a `menu_art.png`/`.jpg` next to the exe still replaces them (drawn to cover the panel).
 - The eighth portrait (second loop, third style) is Aikido (confirmed by the user). Names aren't shown anywhere.
+
+## Widescreen (2026-11-10): done
+
+Display > Picture shape > **Widescreen** (`picture_shape=3`, needs Enhanced graphics). Fights and
+the arena demo scenes fill the window's shape, from 4:3 up to 21:9. Everything else (title,
+player select, VS, bracket, how to play, style intros) stays 4:3 in the middle. The HUD keeps its
+arcade position. In a window, the window sizes become 16:9 at the same height.
+
+What the game's picture is made of decided the design: in fights **only the fighters are 3D**. The
+arena, crowd and floor are 2D tilemaps (the floor is a "line mode" perspective tilemap).
+
+- **2D** (`video.cpp`): the tilemaps are 1024+ pixels wide and the hardware shows a 512-pixel
+  window of them. With widescreen on, the two HD layers are drawn 912 wide (`HD_WIDE_MARGIN` =
+  200 extra columns each side) by carrying the same per-line maths past the screen edges.
+  - Sprites get the same margin (their x is 10-bit signed, so nothing wraps into view).
+  - The back layers are drawn once, wide; the normal 512x448 picture starts as their middle 512
+    columns, so it costs little extra.
+  - Mosaic blocks are still counted from screen x = 0. Without that the 4:3 picture changed by a
+    few hundred pixels near the horizon.
+- **3D** (`video3d.cpp`): each polygon is also clipped to a view 4x wider than the screen
+  (`polygon::hd`) and that copy is what the GPU gets. The software rasteriser still uses MAME's
+  clip. The GPU clips to what it shows.
+- **GPU** (`hd3d.cpp`): `wide` = output shape / (4/3). The 3D target is `wide` times wider and
+  the vertex shader divides x by it. The compositor samples the 2D layers with the margin.
+- **When it goes wide** (`wide_scene`): a line-mode tilemap is enabled and not faded to black
+  (`HdLayers::arena`), and every polygon uses the full-screen window. The fade test keeps the
+  style intros 4:3: their arena is blacked out and the opponent waits just off screen.
+  `BURIKI_WIDE_ALWAYS=1` widens everything, which shows why the flat screens don't: their
+  tilemaps wrap around and repeat in the margins.
+- **Front end**: `picture_rect_wide` (as tall as the 4:3 area, up to 64:27 wide). If the HD
+  renderer can't draw the frame, the normal 4:3 picture is shown.
+- **Checked:**
+  - The software picture is byte-identical with widescreen on and off (40 frames over the first
+    6000 of the soak script, windowed), and headless still matches `frames_soak_ref`.
+  - 15000-frame soak in 16:9: fights, READY/FIGHT, K.O., replay, winner, bracket, VS, continue.
+  - 21:9 window with scanlines.
+- **Known:** the winner banner's dark bar is only 4:3 wide.
+- **Possible, not seen in testing:** a sprite that slides in from off screen would first appear
+  inside the margin, at its starting position.
+- **Test options added:** `--shot-every N --shot-dir DIR` (window screenshots),
+  `BURIKI_WINDOW=WxH` (any window shape).

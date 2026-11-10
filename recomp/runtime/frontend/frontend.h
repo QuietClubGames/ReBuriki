@@ -12,6 +12,8 @@ struct FeOptions {
     uint32_t menu_test_at = 600;       // ...at this frame
     const char* menu_shot = nullptr;   // ...to this .bmp (default menu_test_<page>.bmp)
     bool no_save = false;              // don't write settings.ini / controls.ini (tests)
+    uint32_t shot_every = 0;           // --shot-every N: save the window picture every N frames (tests)...
+    const char* shot_dir = nullptr;    // --shot-dir DIR: ...as DIR/shot_NNNNN.bmp
     const char* test_keys = nullptr;   // --test-keys "N:key,...": simulated key presses at displayed frame N
 };
 

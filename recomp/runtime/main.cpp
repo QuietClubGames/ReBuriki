@@ -90,6 +90,8 @@ int main(int argc, char** argv) {
         else if (arg("--menu-test")) fe.menu_test = argv[++i];
         else if (arg("--menu-test-at")) fe.menu_test_at = (uint32_t)atoi(argv[++i]);
         else if (arg("--menu-shot")) fe.menu_shot = argv[++i];
+        else if (arg("--shot-every")) { fe.shot_every = (uint32_t)atoi(argv[++i]); fe.no_save = true; }
+        else if (arg("--shot-dir")) fe.shot_dir = argv[++i];
         else if (arg("--test-keys")) { fe.test_keys = argv[++i]; fe.no_save = true; }
         else if (!strcmp(argv[i], "--no-sound")) no_sound = true;
         else if (arg("--dump-frames")) {
