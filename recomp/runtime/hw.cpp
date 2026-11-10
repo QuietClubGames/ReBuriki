@@ -4,6 +4,7 @@
 #include "input.h"
 #include "funcs.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -461,6 +462,24 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
         { PerfTimer t(g_perf_sound); sound_frame(); }   // this frame's audio to the speakers / WAV
         raise_irq(1u << 0);
         if (g_frame <= 5 || g_frame % 60 == 0) fprintf(stderr, "[frame] %u  (%llu calls)\n", g_frame, (unsigned long long)g_ticks);
+        {
+            // Diagnostics (env BURIKI_LOGVBL): which function the game is in when each vblank
+            // arrives. If it's always the idle wait loop, the game finishes its work in time.
+            static bool on = getenv("BURIKI_LOGVBL") != nullptr;
+            static std::map<std::string, int> hist;
+            if (on) {
+                hist[cur_func()]++;
+                if (g_frame % 600 == 0) {
+                    std::vector<std::pair<int, std::string>> v;
+                    for (auto& [k, n] : hist) v.push_back({n, k});
+                    std::sort(v.rbegin(), v.rend());
+                    fprintf(stderr, "[vbl] frames %u-%u:", g_frame - 600, g_frame);
+                    for (size_t i = 0; i < v.size() && i < 4; i++) fprintf(stderr, " %s x%d", v[i].second.c_str(), v[i].first);
+                    fprintf(stderr, " (%zu functions)\n", v.size());
+                    hist.clear();
+                }
+            }
+        }
         if (g_frame % 600 == 0) {   // speed report every 10 s of game time (wall clock, display only)
             static auto last = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();

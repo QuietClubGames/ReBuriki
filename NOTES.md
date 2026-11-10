@@ -302,6 +302,36 @@ the window's resolution; the presets render the 512x512 buffer at 2x-8x.
   picture's layout, with smooth 3D edges and textures. Full 59 fps either way on an RTX 5070 Ti.
 - **Not done yet:** widescreen; menu art (`menu_art.png` hook exists, no art is shipped).
 
+## Review, 2026-11-10
+
+Checked:
+- **8-minute scripted play** (`recomp/soak_script.txt`, pseudo-random moves): character
+  select, several matches, VS screens, continue, game over, title, new credit, result
+  screen. No crashes, hangs or NaNs.
+- **CPU budget:** with `BURIKI_LOGVBL=1`, every vblank in fights lands in the idle loop
+  `func_800C5C20`, so 50,000 ticks/frame is enough and the game never drops frames. Only scene
+  loads (big clears) run past a vblank.
+- **Speed** (`[perf]` lines): fights ~100 fps headless with sound, after the parallel 2D
+  renderer. The sound board (V53 interpreter) is now the largest cost, ~40%.
+- **How-to-play gauges:** present in arcade footage too.
+
+Known gaps (graphics: carried over from MAME's own unknowns, see hng64_v.cpp/hng64_3d.ipp):
+- **Intro discipline-name screens:** MAME thinks the backgrounds should fade fully to black
+  but it picks the wrong fade register.
+- **Fighter entrance "door run":** projection packet words 14-15 are unhandled.
+- **Tile animation:** the enable bit (videoregs[1] bit 16) is a guess.
+- **Sprite-vs-3D priority:** a few doubtful cases.
+- **Mosaic + line-scroll:** the interaction is unknown.
+- **Raster interrupt (irq level 1):** not generated. Buriki's handler (0x800C4748) only acks
+  it, so it has no effect.
+
+Other gaps:
+- RTC reads 0 (the operator menu clock).
+- The I/O board's serial EEPROM uses MAME's dualport 0x600 hack.
+- Sound: the rear/sub outputs and the L7A1045 delay effect aren't implemented (MAME doesn't
+  have them either).
+- Widescreen, menu art, an installer/release package, and a README for players.
+
 ## Roadmap
 
 1. **Toolchain**: N64Recomp (MIPS to C translator), Ghidra (disassembler), and a MAME
