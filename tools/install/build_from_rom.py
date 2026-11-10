@@ -35,7 +35,7 @@ sys.path.insert(0, HERE)
 import product  # noqa: E402
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # no console windows flashing up under Setup
-LIBS = ["user32", "gdi32", "winmm", "d3d11", "dxgi", "ole32"]
+LIBS = ["user32", "gdi32", "winmm", "d3d11", "dxgi", "ole32", "ws2_32"]
 RUNTIME_SUBDIRS = ["iomcu", "audiocpu", "frontend"]      # I/O board MCU, sound CPU, PC front end
 
 # What the game reads at run time: (folder, file name, size, CRC-32). Buriki One rev. B (MAME "buriki") and

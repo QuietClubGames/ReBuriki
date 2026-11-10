@@ -24,6 +24,7 @@ void hw_report(void);                  // prints the hardware access summary
 // "Unlock Silber" (menu: Game): the hidden twelfth fighter is selectable whatever the save memory says.
 // Takes effect the next time the player select screen starts. Off = the arcade's own rule.
 void hw_set_unlock_silber(bool on);
+bool hw_get_unlock_silber(void);
 // The arcade's own operator settings (Test menu: GAME OPTIONS and COIN/CREDIT SETTING), for the pause menu's
 // Game and Rules pages. Values are the game's own numbers (hw.cpp has the table).
 enum HwGameOption { GOPT_FREE_PLAY, GOPT_DIFFICULTY, GOPT_DEMO_SOUND, GOPT_COMMAND_DISPLAY, GOPT_ATTACK_CPU,

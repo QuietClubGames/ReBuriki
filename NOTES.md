@@ -879,3 +879,124 @@ tested over 12,000 frames of fights and scene changes, not proven for every scre
   the board and when, and re-run the board from a snapshot only when a replay's log differs
   from the first pass. Costs the old 2.3 ms a frame, but only on those frames.
 - Saves are now the larger part (1.05 ms each, 19.7 MB). Dirty-page tracking would cut that.
+
+## Online play: the rollback core and the link (2026-11-10): working in tests, not in the menu yet
+
+Two players, a direct UDP link, rollback. `netplay.cpp` (the session), `pagestate.cpp` (cheap
+states), hooks in `hw.cpp`, `input.cpp`, `sound.cpp`. Started from the command line for now:
+
+    ReBuriki.exe --netplay-host 7600 [--netplay-delay 2]
+    ReBuriki.exe --netplay-join ADDRESS[:PORT]
+
+`tools\netplay_demo.bat` starts two linked copies of the play copy on one PC.
+
+### How a session starts
+
+Both copies run the whole game from power-on, so there is nothing to synchronise except what
+the machine starts with. After the ROMs are loaded and before the game boots (`netplay_start`):
+
+- The joiner says hello with a fingerprint of the cartridge and BIOS and the build name
+  (`BUILD` in `netplay.cpp`: **change it whenever the emulation changes**). Different game
+  files, region or version: turned away with a message.
+- The host sends its input delay, its Unlock Silber setting, its clock, and its 16 KB save
+  memory (so free play, difficulty and the rest are the host's). The joiner uses that copy for
+  the session and never writes it to its own `nvram.bin`.
+- The clock both games read is the host's local time at the start plus game time
+  (`netplay_clock`, used by `rtc_read`).
+
+Then the arcade's own flow does the rest: coin, start, "here comes a new challenger".
+
+### Frames, controls, guesses
+
+- `hw_events` calls `netplay_frame()` at every frame boundary, where the controls used to be
+  read. A player's controls read at boundary F are for frame F + delay (default 2) and are sent
+  at once; every packet repeats all the controls the other side has not acknowledged, so a lost
+  packet costs nothing but time.
+- Each player uses their own Player 1 keys or first controller; the host is player 1 in the
+  game and the joiner player 2. No Service or Test button online.
+- When the other player's controls for a frame are not here yet the game plays on with a guess
+  (their last known controls), for at most 8 frames (`MAX_PRED`). When the real controls differ,
+  the machine is put back to the state saved at that frame and the frames since are played again
+  with nothing drawn (`savestate_skip_video`) and the sound board not run.
+- A state can be saved when the frame ends with the game waiting in its main loop: not in an
+  interrupt, stack pointer 0x803FFFC0 (`WAIT_SP`; `func_800080B0`'s own level, so the chain of
+  calls above it is always the same). It can be put back at a boundary that ended at the same
+  place in the code (`site`). That is nearly every frame from about frame 15 after power-on.
+- A guess is only allowed while a state from no later than the first unconfirmed frame is being
+  kept. Otherwise the game waits for the real controls. So start-up and scene changes run in
+  step, and everything else runs ahead. A wrong guess found at a boundary that is not a wait
+  point is undone at the next one that is.
+- Each side works out from the frame numbers and the ping whether it is ahead of the other, and
+  sleeps a few milliseconds a frame if so (`pace`). Not tuned yet: in the tests the host tends
+  to be about half a frame ahead, which gives it slightly longer rollbacks.
+
+### States that only copy what changed (`pagestate.cpp`)
+
+A full state was 19.7 MB and took 1.4 ms to copy, every frame and again inside rollbacks: a
+6-frame rollback took 14.7 ms. Now the large areas (main RAM, sprite, tilemap and framebuffer
+memory) are allocated with Windows' write watch, each 4 KB page carries a stamp of when it last
+changed, and bringing a saved copy up to date or putting one back only copies pages with a
+newer stamp than the copy. In a fight that is about 275 KB.
+
+| | full copies | changed pages only |
+|---|---|---|
+| Save | 1.45 ms | 0.14 ms |
+| Longest rollback in the same test | 14.7 ms (6 frames) | 8.9 ms (6 frames) |
+| Replayed frame, all in | 1.87 ms | 1.27 ms (0.87 ms in the windowed test) |
+
+`BURIKI_NOWATCH=1` goes back to plain memory and full copies. Ordinary play is not affected:
+same fingerprint (C307A015EBF7970F at frame 6050 of the soak script), and the save-state test
+still passes with and without `nosound`.
+
+### Sound in a rollback
+
+The board runs forward only. What the game tells it is noted per frame (a command is the latch
+at 0x68000000 when the game raises the command interrupt through 0x68000008; high word the
+command, low word 0x0040). In frames played again, commands the board already had for those
+frames are dropped; new ones are given to it when the rollback ends (`sound_inject_command`:
+latch, interrupt, run the V53 until it acknowledges). A sound that played on a wrong guess is
+not taken back. In a 4,000-frame match with 500 rollbacks: about 255 commands, 3 or 4 given
+late, 0 or 1 played wrongly.
+
+### Checking the two games against each other
+
+Every 60 frames each side fingerprints main RAM in the state of a frame that is settled (all
+controls before it real, no wrong guess outstanding) and sends it; the other compares. A
+difference is logged as "OUT OF STEP". None has occurred.
+
+### Tests (`tools\netplay_test.py`)
+
+Two copies on this PC with separate scripts of random controls and a simulated connection
+(`BURIKI_NET_SIM=delay,jitter,loss%` on what each copy sends), and a third, ordinary run given
+both scripts merged and shifted by the delay. Pass = all three end with the same main RAM and
+every comparison on the way matched. The scripts put in a coin each and play a two-player
+"Special Match" from about frame 1900.
+
+| Run | Rollbacks (host / joiner) | Deepest | Result |
+|---|---|---|---|
+| 3,000 frames, perfect link, as fast as possible | 9 / 11 | 6 | pass |
+| 6,000 frames, 50 ms +20, 5% loss | 506 / 521 | 6 | pass, 99 of 99 comparisons |
+| 6,000 frames, 120 ms +40, 10% loss, as fast as possible | 521 / 526 | 8 | pass, 98 of 98 |
+| 5,500 frames, delay 0, 30 ms +10, 2% loss | 489 / 492 | 6 | pass, 91 of 91 |
+| 5,500 frames, delay 4, one side 80 ms +60 and 15% loss, the other 20 ms | 92 / 416 | 5 | pass, 91 of 91 |
+| 3,600 frames in two real windows (host's save memory, live clock), 40 ms +15, 3% loss | 243 / 252 | 4 | pass, 59 of 59; longest rollback 4.6 ms |
+| 3,200 frames with the installer-built exe, 60 ms +20, 5% loss | 194 / 199 | 8 | pass, 53 of 53 |
+
+### Not done yet
+
+- **No menu.** Hosting and joining are command-line options. Wanted: an Online page (host /
+  join with an address box / delay), a small status line (ping, rollbacks, "waiting for the
+  other player"), and the Game and Rules pages locked while online.
+- **Leaving.** When the other player leaves or the link drops for 10 s the game stops with a
+  message box. It should go back to ordinary play or the menu.
+- **The pause menu** freezes this copy, and the other one waits (a keep-alive stops it timing
+  out: `netplay_idle`). Fine between friends; needs a notice on the waiting side.
+- **The internet.** Direct UDP needs the host's port (7600) reachable: a forwarded port on
+  their router, or a VPN-style tool. No hole punching, no lobby. Windows asks once whether to
+  allow the game through the firewall.
+- **Both players need the same region** (BIOS) chosen before starting; a mismatch is refused,
+  not fixed.
+- **Only tested on one PC.** Real connections, two different PCs and CPUs (the game's own
+  floating-point maths runs on the host CPU: basic operations only, which should give the same
+  results everywhere, and the memory comparison would show it if not).
+- Speed: the I/O board's microcontroller is now the largest part of a replayed frame.

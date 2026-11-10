@@ -12,6 +12,7 @@
 #include <vector>
 #include "hw.h"
 #include "savestate.h"
+#include "netplay.h"
 #include "frontend/frontend.h"
 
 namespace {
@@ -88,10 +89,33 @@ void input_set_script(const char* script) {
     fprintf(stderr, "[input] using an input script with %zu steps (host input ignored)\n", g_script.size());
 }
 
+// Online play: this player's own controls, whichever side of the game they end up on. They use the
+// Player 1 keys and the first controller (or the script's p1 names).
+uint16_t input_read_local(void) {
+    bool hp[2][NUM_BTN] = {}, hs = false, ht = false;
+    fe_read_host(hp, &hs, &ht);
+    uint16_t bits = 0;
+    if (g_use_script) {
+        const char* names[NUM_BTN] = {"p1up", "p1down", "p1left", "p1right", "p1b1", "p1b2", "p1b3", "p1b4", "p1start", "p1coin"};
+        for (int i = 0; i < NUM_BTN; i++) if (script_held(names[i])) bits |= (uint16_t)(1u << i);
+        if (script_held("coin1")) bits |= 1u << COIN;
+    } else {
+        for (int i = 0; i < NUM_BTN; i++) if (hp[0][i]) bits |= (uint16_t)(1u << i);
+    }
+    return bits;
+}
+
 void input_sample_frame(void) {
     bool p[2][NUM_BTN] = {};
     bool service = false, test = false;
-    if (g_use_script) {
+    if (netplay_active()) {
+        // The two players' controls for this frame, as agreed with the other copy of the game (netplay.cpp
+        // read this player's own a few frames ago). No Service or Test button online.
+        uint16_t bits[2];
+        netplay_frame_inputs(bits);
+        for (int pl = 0; pl < 2; pl++)
+            for (int i = 0; i < NUM_BTN; i++) p[pl][i] = (bits[pl] >> i) & 1;
+    } else if (g_use_script) {
         const char* names[NUM_BTN] = {"up", "down", "left", "right", "b1", "b2", "b3", "b4", "start", "coin"};
         for (int pl = 0; pl < 2; pl++)
             for (int i = 0; i < NUM_BTN; i++) {
@@ -104,7 +128,8 @@ void input_sample_frame(void) {
         service = script_held("service");
         test = script_held("test");
     }
-    if (!g_use_script) {
+    if (netplay_active()) {
+    } else if (!g_use_script) {
         fe_read_host(p, &service, &test);
     } else {
         bool hp[2][NUM_BTN] = {}, hs = false, ht = false;

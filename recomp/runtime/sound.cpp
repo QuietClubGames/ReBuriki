@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <string>
 #include "savestate.h"
+#include "netplay.h"
 #include <chrono>
 #include <vector>
 
@@ -91,12 +92,15 @@ void dsp_update_to(uint64_t cycles) {
     }
 }
 
+bool g_command_taken = false;      // the V53 has acknowledged the command interrupt (sound_inject_command)
+uint16_t g_replay_latch[2] = {};   // what the game has in the command latch during a netplay rollback
+
 void sound_comms_w(uint32_t offset, uint16_t data) {
     SLOG("V53 writes comms %X = %04X\n", offset, data);
     switch (offset) {
     case 0x0: sound_latch[0] = data; break;
     case 0x2: sound_latch[1] = data; break;
-    case 0xa: g_cpu.set_input_line(v53::V53A::LINE_IRQ5, false); break;
+    case 0xa: g_cpu.set_input_line(v53::V53A::LINE_IRQ5, false); g_command_taken = true; break;
     }
 }
 uint16_t sound_comms_r(uint32_t offset) {
@@ -285,17 +289,55 @@ extern "C" uint32_t sound_main_read(uint32_t pa) {
 extern "C" void sound_main_write(uint32_t pa, uint32_t v, uint32_t mask) {
     if (!g_enabled) return;
     sound_run();
-    if (savestate_skip_sound()) return;
+    if (savestate_skip_sound()) {
+        // A rollback is playing frames again and the board is not part of it. Online play still needs to
+        // know which commands the game sends this time round (netplay.cpp decides what to do with them).
+        if (netplay_active()) {
+            if (pa == 0x68000000) {
+                if (mask & 0xffff0000u) g_replay_latch[0] = (uint16_t)(v >> 16);
+                if (mask & 0x0000ffffu) g_replay_latch[1] = (uint16_t)v;
+            } else if (pa == 0x68000008 && (mask & 0xffff0000u) && ((v >> 16) & 1)) {
+                netplay_sound_command((uint32_t)g_replay_latch[0] << 16 | g_replay_latch[1]);
+            }
+        }
+        return;
+    }
+    {   // BURIKI_LOGCMD=N: what the game sends the board, from frame N (600 lines)
+        static int from = -1, left = 600;
+        if (from < 0) { const char* e = getenv("BURIKI_LOGCMD"); from = e ? atoi(e) : 0; }
+        if (from && (int)hw_frame_number() >= from && left > 0) {
+            left--;
+            fprintf(stderr, "[cmd %u] %08X = %08X (mask %08X)\n", hw_frame_number(), pa, v, mask);
+        }
+    }
     SLOG("main writes %08X = %08X (mask %08X)\n", pa, v, mask);
     if (pa == 0x68000000) {
         if (mask & 0xffff0000u) main_latch[0] = (uint16_t)(v >> 16);
         if (mask & 0x0000ffffu) main_latch[1] = (uint16_t)v;
+        g_replay_latch[0] = main_latch[0]; g_replay_latch[1] = main_latch[1];
     } else if (pa == 0x68000008) {
-        if ((mask & 0xffff0000u) && ((v >> 16) & 1) && g_running) g_cpu.set_input_line(v53::V53A::LINE_IRQ5, true);
+        if ((mask & 0xffff0000u) && ((v >> 16) & 1)) {
+            if (g_running) g_cpu.set_input_line(v53::V53A::LINE_IRQ5, true);
+            if (netplay_active()) netplay_sound_command((uint32_t)main_latch[0] << 16 | main_latch[1]);
+        }
     } else if (pa == 0x6F000000 && (mask & 0xffff0000u)) {
         const uint16_t cmd = (uint16_t)(v >> 16);
         if (cmd == 0x55AA) set_running(true);
         else if (cmd == 0xAA55) set_running(false);
+    }
+}
+
+// Online play: a command the game turned out to send in a frame that a rollback played again, and which the
+// board was never given. It is handed over now (late by the depth of the rollback): latch, interrupt, and
+// the CPU runs until it has taken it, so that several can be given one after another.
+void sound_inject_command(uint32_t latch) {
+    if (!g_enabled || !g_running) return;
+    main_latch[0] = (uint16_t)(latch >> 16); main_latch[1] = (uint16_t)latch;
+    g_command_taken = false;
+    g_cpu.set_input_line(v53::V53A::LINE_IRQ5, true);
+    for (int i = 0; i < 400 && !g_command_taken; i++) {
+        g_cpu.run(64);
+        dsp_update_to(now_cycles());
     }
 }
 

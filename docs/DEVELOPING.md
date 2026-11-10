@@ -49,6 +49,11 @@ The exe takes options for automated runs (the full list is at the top of `recomp
   main RAM.
 - `--dump-dir` / `--dump-every` save the 512x448 picture; `--shot-every` saves the window.
 - `--set key=value` changes a `settings.ini` value for one run. `--test-keys` presses menu keys.
+- Online play (in development, not in the menu yet): `--netplay-host PORT` on one copy and
+  `--netplay-join ADDRESS[:PORT]` on the other; `--netplay-delay N` on the host sets the input delay.
+  `python tools\netplay_test.py` runs two linked copies through a simulated bad connection and checks
+  they end up identical to an ordinary run; `tools\netplay_demo.bat` shows two linked windows on one PC.
+  See "Online play" in `NOTES.md`.
 - Environment variables for diagnostics are listed in `NOTES.md` (`BURIKI_LOG3D`, `BURIKI_SPRITES`,
   `BURIKI_RAMDUMP`, `BURIKI_POKE`, `BURIKI_LOGFX` and others).
 

@@ -21,6 +21,7 @@
 #include "savestate.h"
 #include "hw.h"
 #include "funcs.h"
+#include "netplay.h"
 
 #include <chrono>
 #include <cstdio>
@@ -132,9 +133,14 @@ void finish() {
 
 } // namespace
 
-bool savestate_skip_video(void) { return g.on && g.novideo && g.phase == 2; }
-bool savestate_skip_sound(void) { return g.on && g_nosound && g.phase == 2; }
+bool savestate_skip_video(void) { return (g.on && g.novideo && g.phase == 2) || netplay_replaying(); }
+bool savestate_skip_sound(void) { return (g.on && g_nosound && g.phase == 2) || netplay_replaying(); }
 bool savestate_without_sound(void) { return g_nosound; }
+void savestate_machine(StateIO& io, void* recomp_ctx) { machine(io, recomp_ctx); }
+void savestate_set_without_sound(bool on) { g_nosound = on; }
+static bool g_pages_separate = false;
+void savestate_set_pages_separate(bool on) { g_pages_separate = on; }
+bool savestate_pages_separate(void) { return g_pages_separate; }
 
 void savestate_frame(void* ctx, const void* site, bool in_irq) {
     if (!g.parsed) parse();

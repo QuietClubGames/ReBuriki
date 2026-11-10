@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "ui.h"
 #include "../hw.h"
+#include "../netplay.h"
 #include "../audio_out.h"
 #include <mmsystem.h>
 #include <atomic>
@@ -344,6 +345,15 @@ static void wait_frame() {
     QueryPerformanceCounter(&last);
 }
 
+[[noreturn]] void fe_quit(void);
+void fe_wait_pump(void) {
+    g_activity++;
+    if (!g_wnd) return;
+    MSG msg;
+    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageA(&msg); }
+    if (g_closing) fe_quit();
+}
+
 [[noreturn]] void fe_quit(void) {
     fprintf(stderr, "[video] window closed\n");
     hw_report();
@@ -475,7 +485,7 @@ void fe_present_frame(const uint32_t* rgb, int w, int h) {
         // The pause: the game stays inside this vblank, so no emulated time passes. The frozen frame keeps
         // being shown under the menu, and the sound card is paused rather than left to run dry.
         audio_out_pause(true);
-        while (ui_menu_wants_pause()) one_frame(rgb, w, h);
+        while (ui_menu_wants_pause()) { one_frame(rgb, w, h); netplay_idle(); }   // (online: the other player waits)
         audio_out_pause(false);
     }
 }

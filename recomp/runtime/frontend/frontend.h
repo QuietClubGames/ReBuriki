@@ -40,6 +40,9 @@ void fe_controls_load(void);
 
 // Watchdog support: changes while the front end is busy (menu open, window being dragged...).
 uint64_t fe_activity(void);
+// While the game is made to wait on purpose (online play, for the other player): keeps the window
+// answering and tells the watchdog the wait is meant.
+void fe_wait_pump(void);
 
 // Arcade save memory (the 16 KB nvram at physical 0x1F800000): loaded after hw_init, saved when it changes
 // (at most once a second) and at exit. path = nullptr disables it.

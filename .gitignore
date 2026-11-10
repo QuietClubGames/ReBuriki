@@ -25,6 +25,7 @@ recomp/*.wav
 recomp/*.png
 recomp/frames*/
 recomp/hdtest/
+recomp/nettest/
 recomp/run*.txt
 *.bmp
 

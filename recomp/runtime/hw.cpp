@@ -5,6 +5,8 @@
 #include "video.h"
 #include "menu_art.h"
 #include "savestate.h"
+#include "netplay.h"
+#include "pagestate.h"
 #include "funcs.h"
 
 #include <algorithm>
@@ -41,7 +43,10 @@ struct Region {
 std::vector<Region> g_regions;
 
 uint8_t* add_region(uint32_t base, uint32_t size, bool ro, const char* name, uint8_t* data = nullptr) {
-    if (!data) data = (uint8_t*)calloc(1, size);
+    // The large areas the game writes to are watched for writes, so that online play's save states only
+    // copy the pages that changed (pagestate.h). The sound board's memory is not part of those states.
+    const bool big = !ro && (base == 0x00000000 || base == 0x20000000 || base == 0x20100000 || base == 0x30000000);
+    if (!data) data = big ? pagestate_alloc(size) : (uint8_t*)calloc(1, size);
     g_regions.push_back({base, size, data, ro, name});
     return data;
 }
@@ -177,8 +182,14 @@ int rtc_read(int reg) {
     static struct tm now;
     if (frame != g_frame) {
         frame = g_frame;
-        const time_t t = time(nullptr);
-        if (const struct tm* lt = localtime(&t)) now = *lt;
+        if (netplay_active()) {
+            // online: both games must read the same clock, so it is the host's at the start plus game time
+            const time_t t = (time_t)netplay_clock(g_frame);
+            if (const struct tm* gt = gmtime(&t)) now = *gt;
+        } else {
+            const time_t t = time(nullptr);
+            if (const struct tm* lt = localtime(&t)) now = *lt;
+        }
     }
     const int year = now.tm_year % 100, month = now.tm_mon + 1;
     switch (reg) {
@@ -352,6 +363,7 @@ void hw_write32(uint32_t a, uint32_t v) { access_write(a, v, 4); }
 void hw_write16(uint32_t a, uint16_t v) { access_write(a, v, 2); }
 void hw_write8(uint32_t a, uint8_t v)   { access_write(a, v, 1); }
 
+bool hw_get_unlock_silber(void) { return g_unlock_silber; }
 void hw_set_unlock_silber(bool on) {
     g_unlock_silber = on;
     if (!g_ram) return;
@@ -421,6 +433,7 @@ extern "C++" void hw_state(StateIO& io, void* recomp_ctx) {
     for (Region& r : g_regions) {
         if (r.read_only) continue;
         if ((r.base == 0x60000000 || r.base == 0x68000000) && savestate_without_sound()) continue;   // the sound board's
+        if (savestate_pages_separate() && pagestate_owns(r.data)) continue;                          // copied by pagestate
         io.raw(r.data, r.size);
     }
     io.raw(recomp_ctx, sizeof(recomp_context));
@@ -672,6 +685,9 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
         g_in_vblank = true;
         g_frame++;
         if (!savestate_skip_video()) { PerfTimer t(g_perf_video); video_frame(); }   // draw + present the frame the game just built
+        // Online play: exchange controls with the other player; may put the machine back to an earlier
+        // frame (a rollback), after which the frames up to this one play again without being drawn.
+        netplay_frame(ctx, __builtin_return_address(0), g_in_irq);
         input_sample_frame();        // controls for the next frame
         { PerfTimer t(g_perf_sound); sound_frame(); }   // this frame's audio to the speakers / WAV
         raise_irq(1u << 0);

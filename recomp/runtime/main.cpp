@@ -47,6 +47,7 @@
 #endif
 #include "hw.h"
 #include "savestate.h"
+#include "netplay.h"
 #include "video.h"
 #include "input.h"
 #include "funcs.h"
@@ -182,6 +183,8 @@ int main(int argc, char** argv) {
     const char* nvram = nullptr;
     bool no_nvram = false, bios_given = false;
     std::vector<const char*> overrides;
+    NetplayOptions net;
+    bool netplay = false;
     for (int i = 1; i < argc; i++) {
         auto arg = [&](const char* name) { return !strcmp(argv[i], name) && i + 1 < argc; };
         if (arg("--frames")) cfg.max_frames = (uint32_t)atoi(argv[++i]);
@@ -207,6 +210,9 @@ int main(int argc, char** argv) {
         else if (arg("--shot-dir")) fe.shot_dir = argv[++i];
         else if (arg("--test-keys")) { fe.test_keys = argv[++i]; fe.no_save = true; }
         else if (!strcmp(argv[i], "--no-sound")) no_sound = true;
+        else if (arg("--netplay-host")) { netplay = true; net.host = true; net.port = atoi(argv[++i]); }
+        else if (arg("--netplay-join")) { netplay = true; net.join = argv[++i]; }
+        else if (arg("--netplay-delay")) net.delay = atoi(argv[++i]);
         else if (arg("--dump-frames")) {
             for (char* t = strtok(argv[++i], ","); t; t = strtok(nullptr, ",")) g_video_cfg.dump_frames.push_back((uint32_t)atoi(t));
         }
@@ -246,7 +252,16 @@ int main(int argc, char** argv) {
     // The arcade's save memory (operator settings, high scores), before the game boots and reads it.
     static std::string nvram_default;
     if (!nvram && !g_video_cfg.headless && !fe.menu_test) { nvram_default = fe_default_nvram_path(); nvram = nvram_default.c_str(); }
+    // Online play: the host uses its own save memory and the joiner is given a copy for the session (and
+    // never writes it to its own file).
+    if (netplay && !net.host) nvram = nullptr;
     if (!no_nvram) fe_nvram_init(nvram);
+    if (netplay) {
+        net.max_frames = cfg.max_frames;
+        net.unlock_silber = hw_get_unlock_silber();
+        const char* why = "";
+        if (!netplay_start(net, &why)) hw_fatal("Online play could not start: %s.", why);
+    }
     hw_boot(&g_ctx);
 
     // Watchdog: if no recompiled function or loop label is reached for 3 s, the game is

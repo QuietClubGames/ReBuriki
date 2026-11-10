@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "ui.h"
 #include "../hw.h"
+#include "../netplay.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -34,7 +35,7 @@ static void apply(int save) {
         g_applied_wide = g_settings.aspect == ASPECT_WIDE;
     }
     if (g_settings.pacing != g_applied_pacing) { video_set_pacing(g_settings.pacing); g_applied_pacing = g_settings.pacing; }
-    hw_set_unlock_silber(g_settings.unlock_silber != 0);     // from the next player select screen
+    if (!netplay_active()) hw_set_unlock_silber(g_settings.unlock_silber != 0);     // from the next player select screen (online: the host's choice, fixed for the session)
     g_aspect_mode = g_settings.aspect;
     g_blit_smooth = g_settings.filter == FILTER_SMOOTH;
     g_blit_scan = g_settings.filter == FILTER_SCANLINES ? 1.0f : 0.0f;

@@ -43,3 +43,10 @@ bool savestate_skip_video(void);
 // is not run during the replays (savestate_skip_sound).
 bool savestate_skip_sound(void);
 bool savestate_without_sound(void);
+// For netplay (netplay.cpp): the whole machine in or out, and the choice to leave the sound board out of it.
+// The skip questions above are also true during a netplay rollback.
+void savestate_machine(StateIO& io, void* recomp_ctx);
+void savestate_set_without_sound(bool on);
+// Netplay copies the large memory areas itself, page by page (pagestate.h): hw_state then leaves them out.
+void savestate_set_pages_separate(bool on);
+bool savestate_pages_separate(void);

@@ -68,7 +68,7 @@ try {
 
     $objs = $files | ForEach-Object { & $objOf $_ }
     # d3d11/dxgi: presentation; ole32: menu art (WIC). The shader compiler (d3dcompiler_47.dll) is loaded at run time.
-    & clang++ $objs -o buriki.exe -luser32 -lgdi32 -lwinmm -ld3d11 -ldxgi -lole32
+    & clang++ $objs -o buriki.exe -luser32 -lgdi32 -lwinmm -ld3d11 -ldxgi -lole32 -lws2_32
     if ($LASTEXITCODE) { throw "link failed" }
     "built recomp\buriki.exe"
 } finally { Pop-Location }
