@@ -14,6 +14,7 @@ void settings_defaults(Settings* s) {
     s->window_size = 2;            // 1195x896: two screen lines per arcade line
     s->enhanced = 1;
     s->volume = 100;
+    s->unlock_silber = 1;          // like ReLayer's "unlock all characters": on unless the player wants to earn him
     s->region = REGION_USA;        // English by default; Japanese stays selectable
 }
 
@@ -43,6 +44,7 @@ static const struct { const char* key; size_t ofs; int lo, hi; } k_fields[] = {
     {"show_fps", offsetof(Settings, show_fps), 0, 1},
     {"volume", offsetof(Settings, volume), 0, 100},
     {"mute", offsetof(Settings, mute), 0, 1},
+    {"unlock_silber", offsetof(Settings, unlock_silber), 0, 1},
     {"region", offsetof(Settings, region), 0, REGION_COUNT - 1},
 };
 

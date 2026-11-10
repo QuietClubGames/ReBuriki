@@ -21,6 +21,9 @@ extern const char* g_func_ring[HW_FUNC_RING];
 extern uint32_t g_func_ring_pos;
 void hw_dump_recent_functions(void);
 void hw_report(void);                  // prints the hardware access summary
+// "Unlock Silber" (menu: Game): the hidden twelfth fighter is selectable whatever the save memory says.
+// Takes effect the next time the player select screen starts. Off = the arcade's own rule.
+void hw_set_unlock_silber(bool on);
 [[noreturn]] void hw_fatal(const char* fmt, ...);
 // Called with the message just before hw_fatal exits (main.cpp shows it in a message box when the
 // game runs without a console, as the installed game does).

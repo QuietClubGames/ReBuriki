@@ -244,11 +244,26 @@ void phys_write(uint32_t pa, uint32_t v, int size) {
     write_hook(aligned, v << shift, mask);
 }
 
+// ---- "Unlock Silber" ---------------------------------------------------------------------
+// The game keeps a 16-bit word of flags in its save memory (nvram + 0x20F0): bits 0-10 = "finished
+// with fighter n", bit 13 = Silber selectable. It sets bit 13 itself once bits 0-10 are all set,
+// or after the operator menu's hidden code (NOTES.md, "Silber"). The player select screen asks
+// for bit 13 each time it starts.
+// With the option on, the game always reads bit 13 as set. What is stored stays truthful: when
+// the game writes the word back, bit 13 is stored only if it was already there or the eleven
+// fighter bits are complete. So turning the option off returns to exactly what was earned.
+// The game also caches the word in RAM (gp + 0x27C0, with 0x4000 = "loaded"); switching the option
+// updates that copy too. Addresses are for Buriki One rev. B.
+constexpr uint32_t SILBER_FLAGS_PA = 0x1F8020F0, SILBER_CACHE_RAM = 0x000F3990;
+constexpr uint32_t SILBER_BIT = 0x2000, SILBER_ALL_FIGHTERS = 0x07FF, SILBER_CACHE_LOADED = 0x4000;
+bool g_unlock_silber = false;
+
 uint32_t access_read(uint32_t va, int size) {
     uint32_t pa;
     if (!translate(va, pa)) hw_fatal("read from unmapped address %08X (no TLB entry) in %s", va, cur_func());
     if (pa - 0x1F808000u < 0x800) io_board_run();   // let the I/O MCU catch up before sharing RAM
     uint32_t w = phys_read32(pa & ~3u);
+    if (g_unlock_silber && (pa & ~3u) == SILBER_FLAGS_PA) w |= SILBER_BIT << 16;   // (the word's upper half)
     uint32_t v = size == 4 ? w
                : size == 2 ? (w >> (16 * (1 - ((pa >> 1) & 1)))) & 0xFFFF
                            : (w >> (8 * (3 - (pa & 3)))) & 0xFF;
@@ -261,6 +276,12 @@ void access_write(uint32_t va, uint32_t v, int size) {
     if (!translate(va, pa)) hw_fatal("write %08X to unmapped address %08X (no TLB entry) in %s", v, va, cur_func());
     if (pa - 0x1F808000u < 0x800) io_board_run();
     if (pa >= HW_RAM_SIZE) log_io(va, pa, true, v, size);
+    if (g_unlock_silber && pa == SILBER_FLAGS_PA && size == 2) {
+        // store bit 13 only if it was earned (see above)
+        const uint32_t stored = phys_read32(SILBER_FLAGS_PA) >> 16;
+        const bool earned = (stored & SILBER_BIT) || (v & SILBER_ALL_FIGHTERS) == SILBER_ALL_FIGHTERS;
+        v = (v & ~SILBER_BIT) | (earned ? SILBER_BIT : 0);
+    }
     phys_write(pa, v, size);
 }
 
@@ -287,6 +308,17 @@ uint8_t  hw_read8(uint32_t a)  { return (uint8_t)access_read(a, 1); }
 void hw_write32(uint32_t a, uint32_t v) { access_write(a, v, 4); }
 void hw_write16(uint32_t a, uint16_t v) { access_write(a, v, 2); }
 void hw_write8(uint32_t a, uint8_t v)   { access_write(a, v, 1); }
+
+void hw_set_unlock_silber(bool on) {
+    g_unlock_silber = on;
+    if (!g_ram) return;
+    // the game's cached copy of the flags, if it has loaded them already
+    uint16_t* cache = (uint16_t*)(g_ram + (SILBER_CACHE_RAM ^ 2));
+    if (!(*cache & SILBER_CACHE_LOADED)) return;
+    const bool earned = (hw_phys_words(SILBER_FLAGS_PA)[0] >> 16) & SILBER_BIT;
+    if (on || earned) *cache |= SILBER_BIT;
+    else *cache &= (uint16_t)~SILBER_BIT;
+}
 
 void hw_tlb_write(uint32_t index, uint32_t pagemask, uint32_t entryhi, uint32_t phys0, uint32_t phys1) {
     if (index >= 48) hw_fatal("TLB index %u out of range", index);

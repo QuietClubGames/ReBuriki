@@ -171,6 +171,10 @@ int main(int argc, char** argv) {
         if (FILE* f = fopen(path.c_str(), "rb")) { fclose(f); cfg.bios_file = bios.c_str(); }
         else fprintf(stderr, "[frontend] %s not found, booting with brom1.bin (Japan)\n", path.c_str());
     }
+    // Unlock Silber: the menu's setting with a window (applied by the front end when the window opens);
+    // headless runs leave the game as the arcade has it unless asked with --set unlock_silber=1.
+    for (const char* o : overrides)
+        if (g_video_cfg.headless && !strcmp(o, "unlock_silber=1")) hw_set_unlock_silber(true);
     fe_note_running_bios(cfg.bios_file);
     fprintf(stderr, "[boot] BIOS %s\n", cfg.bios_file ? cfg.bios_file : "brom1.bin");
 

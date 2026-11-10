@@ -85,6 +85,7 @@ static int g_ctl_player;        // Controls page: which player's buttons are sho
 static int get_player(void) { return g_ctl_player; }
 static void set_player(int v) { g_ctl_player = v; }
 
+ACCESS(unlock_silber, unlock_silber)
 static int get_region(void) { return g_settings.region; }
 static void set_region(int v) {
     g_settings.region = v;
@@ -172,6 +173,7 @@ static const Item k_controls[] = {
     ACTION("Restore defaults", "Keyboard: arrows Z X C V 1 5 and R F D G A S Q W 2 6. Pads: X Y A B, Start, Back.", act_reset_binds, nullptr),
 };
 static const Item k_game[] = {
+    TOGGLE("Unlock Silber", "The hidden twelfth fighter, Original Karate, at the bottom of the style list. Off: locked until earned, as in the arcade.", get_unlock_silber, set_unlock_silber),
     CHOICE("Language / region", "The board's BIOS sets the game's language. The game reads it at power on, so it applies after a restart.", get_region, set_region, k_region, nullptr),
     ACTION("Restart now to apply", "Starts the arcade board again with the new region.", act_restart, region_pending),
     INFO("Arcade save memory", "Operator settings and high scores are kept between runs.", info_save),

@@ -24,6 +24,7 @@ struct Settings {
     int show_fps;
     int volume;           // 0-100
     int mute;
+    int unlock_silber;    // 1 = the hidden twelfth fighter is selectable from the start (hw_set_unlock_silber)
     int region;           // REGION_*: which BIOS the board boots with (the game's language); applies after restart
 };
 

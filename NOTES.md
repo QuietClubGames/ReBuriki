@@ -512,7 +512,7 @@ player's PC from their own `buriki.zip` and `hng64.zip`.
 - **Not tested:** a normal interactive install (shortcuts, the Apps entry) and Uninstall, which
   need clicking through; and a slow or low-memory PC.
 
-## Silber, the hidden twelfth fighter (2026-11-10): found, not yet in our menu
+## Silber, the hidden twelfth fighter (2026-11-10): found; "Unlock Silber" in the menu
 
 Read from the game's code and confirmed by running it. Addresses are for rev. B.
 
@@ -542,3 +542,18 @@ Read from the game's code and confirmed by running it. Addresses are for rev. B.
   big-endian on those frames; `BURIKI_POKE=f0-f1:ADDR=VV;...` writes RAM bytes at the end of
   each frame in a range (experiments only). The script control name for the Test button is
   `test`.
+- **Menu: Game > Unlock Silber** (`unlock_silber` in settings.ini, on by default, asked for by the
+  user: "like the Fighting Layer option, unlocked from the start").
+  - `hw_set_unlock_silber` (`hw.cpp`): with it on, reads of the flag word return bit 13 set, so
+    the select screen offers twelve fighters. Nothing is written for it.
+  - When the game writes the word back, bit 13 is stored only if it was already stored or the
+    eleven fighter bits are complete. So the save memory holds what was really earned, and
+    turning the option off goes back to that.
+  - Switching it also fixes up the game's cached copy in RAM, so it applies from the next
+    player select screen without a restart.
+  - Headless runs leave it off unless given `--set unlock_silber=1`, so reference runs are the
+    arcade's behaviour.
+  - Checked: blank save + option on: the twelfth slot is "ORIGINAL KARATE", Silber plays a
+    fight; the save file's flag word stayed 0000 over two runs and its play counters carried on
+    (1 then 2), so the game doesn't treat the save as damaged. Headless frames still match
+    `frames_soak_ref`. Not checked by hand: switching the option in the menu mid-session.

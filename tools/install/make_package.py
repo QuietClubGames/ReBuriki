@@ -370,8 +370,13 @@ Pages:
             frame pacing, graphics card, frame-rate counter
   Audio     volume, mute
   Controls  change any key or button ("press the one you want"), stick dead zone, restore defaults
-  Game      language / region: Japan (Japanese), USA or World (English). Applies after a restart.
+  Game      unlock Silber (on by default); language / region: Japan (Japanese), USA or World
+            (English), which applies after a restart
   System    resume, the arcade's operator menu, restart, quit
+
+Silber, the final boss, is a hidden twelfth fighter ("Original Karate", at the bottom of the style
+list). With "Unlock Silber" on he can be picked from the start. Turn it off to earn him the arcade's
+way; what you have earned is kept either way.
 
 Widescreen (Display > Picture shape): fights fill a 16:9 screen, up to 21:9, with more of the arena at
 the sides. Menus and other flat screens stay 4:3. It needs Graphics set to Enhanced.
