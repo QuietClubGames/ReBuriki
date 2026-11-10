@@ -315,10 +315,21 @@ Checked:
   renderer. The sound board (V53 interpreter) is now the largest cost, ~40%.
 - **How-to-play gauges:** present in arcade footage too.
 
+Resolved from the game's own register writes (2026-11-10), without arcade footage:
+- **Intro discipline-name screens: FIXED.** The fade register per background group is
+  chosen by tcram 0x14 bits 16-17 (bit 16: group L0 uses fade 1; bit 17: group L1 uses fade 1).
+  MAME hard-codes the 0001 case. On the style intros the game sets 0007 and loads fade 1 with
+  full black, so the arena now fades out behind the title, portrait and 3D fighter. Only those
+  5 screens change across the attract loop and 12,000 frames of play. Details in
+  `video.cpp` (tilemap_draw_roz_core_line); `BURIKI_MAME_FADE=1` restores MAME's mapping.
+- **Fighter entrance "door run": nothing to fix.** Projection words 14-15 hold one value for
+  the whole entrance while the camera moves and zooms, so they aren't camera data; most likely
+  leftovers in the packet. The renders look right.
+
+Diagnostics for this kind of work: `BURIKI_LOGVID=1` (video/transition register changes per
+frame), `BURIKI_HIDE_TM=mask` (hide tilemap layers), `BURIKI_LOG3D=1` (projection packets).
+
 Known gaps (graphics: carried over from MAME's own unknowns, see hng64_v.cpp/hng64_3d.ipp):
-- **Intro discipline-name screens:** MAME thinks the backgrounds should fade fully to black
-  but it picks the wrong fade register.
-- **Fighter entrance "door run":** projection packet words 14-15 are unhandled.
 - **Tile animation:** the enable bit (videoregs[1] bit 16) is a guess.
 - **Sprite-vs-3D priority:** a few doubtful cases.
 - **Mosaic + line-scroll:** the interaction is unknown.
