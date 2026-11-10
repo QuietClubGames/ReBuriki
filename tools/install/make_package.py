@@ -39,6 +39,7 @@ SOURCE_PREFIXES = ("recomp/buriki.toml", "recomp/runtime/", "tools/data/", "tool
                    "tools/sections.py", "tools/make_symbols.py", "tools/find_kernel_funcs.py",
                    "tools/make_func_table.py", "tools/make_recomp_header.py", "tools/fix_generated.py",
                    "tools/install/build_from_rom.py", "tools/install/product.py", "LICENSE.md", "licenses/")
+NEVER_PACKAGE = (".bin", ".zip", ".bmp", ".wav", ".log", ".ini", ".exe", ".o")   # dumps, saves, ROM sets, builds
 PY_LIB_SKIP = {"test", "idlelib", "tkinter", "turtledemo", "ensurepip", "site-packages", "__pycache__", "lib2to3",
                "pydoc_data", "venv", "unittest", "sqlite3", "curses", "msilib", "distutils"}
 PY_DLL_SKIP = ("_tkinter", "tcl", "tk", "_test", "_ctypes_test", "xxlimited", "sqlite3", "_sqlite3", "libcrypto",
@@ -213,6 +214,8 @@ def package_source(ico):
     out = subprocess.check_output(["git", "ls-files", "-co", "--exclude-standard"], cwd=ROOT, text=True)
     n = 0
     for f in out.splitlines():
+        if f.lower().endswith(NEVER_PACKAGE):
+            continue
         if f.startswith(SOURCE_PREFIXES) and os.path.isfile(os.path.join(ROOT, f)):
             copy(os.path.join(ROOT, f), os.path.join(FILES, "source", f))
             n += 1
@@ -259,12 +262,45 @@ def package_clang(tc):
     say(f"clang {ver}")
 
 
+UTF8_MANIFEST = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
+"""
+
+
+def add_utf8_manifest(exe):
+    """Give an exe a manifest that makes its file paths UTF-8 (Windows 10 1903 and later). N64Recomp turns
+    paths into narrow strings and stops on a folder name with letters outside the PC's code page (an install
+    folder under a user name in another alphabet); with this it reads them as UTF-8."""
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.BeginUpdateResourceW.restype = wintypes.HANDLE
+    k.BeginUpdateResourceW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL]
+    k.UpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.LPVOID, wintypes.WORD, wintypes.LPVOID,
+                                  wintypes.DWORD]
+    k.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
+    h = k.BeginUpdateResourceW(exe, False)
+    if not h:
+        sys.exit(f"can't open {exe} to add its manifest (error {ctypes.get_last_error()})")
+    RT_MANIFEST, ID, LANG_EN_US = 24, 1, 0x0409
+    ok = k.UpdateResourceW(h, RT_MANIFEST, ID, LANG_EN_US, UTF8_MANIFEST, len(UTF8_MANIFEST))
+    if not k.EndUpdateResourceW(h, not ok) or not ok:
+        sys.exit(f"can't add the manifest to {exe} (error {ctypes.get_last_error()})")
+
+
 def package_n64recomp():
     dst = os.path.join(FILES, "n64recomp")
     exe = os.path.join(N64RECOMP, "build", "N64Recomp.exe")
     if not os.path.isfile(exe):
         sys.exit("third_party/N64Recomp/build/N64Recomp.exe is missing: build N64Recomp first")
     copy(exe, os.path.join(dst, "N64Recomp.exe"))
+    add_utf8_manifest(os.path.join(dst, "N64Recomp.exe"))
     copy(os.path.join(N64RECOMP, "include", "recomp.h"), os.path.join(dst, "recomp.h"))
     copy(os.path.join(N64RECOMP, "LICENSE"), os.path.join(dst, "LICENSE.txt"))
 
@@ -316,6 +352,8 @@ INSTALLING
    choose "More info", then "Run anyway".
 3. Choose your buriki.zip and your hng64.zip, and where to install. Then press Install.
    (If the two zips are next to Setup.exe or in your Downloads folder, Setup finds them itself.)
+   Setup installs into a folder of its own: a new or empty one, or one that already holds the game.
+   Installing over an older version keeps your settings and saves.
 
 Setup checks the ROMs, then builds the game from them on your PC and adds shortcuts. This takes a minute
 or two on a recent PC and longer on an older one. It needs about 500 MB of free disk space; the installed
@@ -396,7 +434,8 @@ Windows 10 or 11 (64-bit) and a graphics card with Direct3D 11.
 
 REMOVING THE GAME
 -----------------
-Windows Settings > Apps > {display} > Uninstall. It asks whether to keep your settings.
+Windows Settings > Apps > {display} > Uninstall, or run Uninstall.exe in the install folder.
+It asks whether to keep your settings. Only the game's own files are removed.
 
 REPORTING A PROBLEM
 -------------------

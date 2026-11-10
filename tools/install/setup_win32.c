@@ -23,6 +23,8 @@
  * (make_background).
  *
  * Command line (for testing):  /rom=<zip> /bios=<zip> /dest=<folder> /silent /noshortcuts /noregister /shot=<bmp>
+ * Uninstall:  /uninstall  (or just running the copy named Uninstall.exe), with /silent for no questions
+ * (settings are kept) and /purge to delete the settings and saves as well.
  */
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
@@ -265,6 +267,27 @@ static DWORD WINAPI reader(LPVOID pipe) {
     return 0;
 }
 
+/* Append  name "value"  to a command line, quoted the way CommandLineToArgvW and the C runtime read it:
+ * backslashes just before a quote (or before the closing quote) are doubled, quotes are escaped. */
+static void add_arg(wchar_t *cmd, size_t cap, const wchar_t *name, const wchar_t *value) {
+    size_t n = wcslen(cmd);
+    if (name) { swprintf(cmd + n, cap - n, L" %ls", name); n = wcslen(cmd); }
+    if (n + 2 >= cap) return;
+    cmd[n++] = L' ';
+    cmd[n++] = L'"';
+    for (const wchar_t *p = value; *p && n + 4 < cap; p++) {
+        size_t slashes = 0;
+        while (*p == L'\\') { slashes++; p++; }
+        if (*p == 0 || *p == L'"') slashes *= 2;            /* they would otherwise escape the quote */
+        while (slashes-- && n + 4 < cap) cmd[n++] = L'\\';
+        if (*p == 0) break;
+        if (*p == L'"') cmd[n++] = L'\\';
+        cmd[n++] = *p;
+    }
+    cmd[n++] = L'"';
+    cmd[n] = 0;
+}
+
 static int start_build(const wchar_t *rom, const wchar_t *bios, const wchar_t *dest) {
     wchar_t py[MAX_PATH], script[MAX_PATH], clang[MAX_PATH], recomp[MAX_PATH], cmd[8 * MAX_PATH];
     path_join(py, g_files, L"python\\python.exe");
@@ -275,16 +298,26 @@ static int start_build(const wchar_t *rom, const wchar_t *bios, const wchar_t *d
         wcscpy(g_error, L"Setup's files folder is missing or incomplete. Unzip the whole Setup download and run Setup.exe from there.");
         return 0;
     }
-    SHCreateDirectoryExW(NULL, dest, NULL);
+    /* the folder must exist (or be creatable) and be writable: the log goes there first */
+    int made = SHCreateDirectoryExW(NULL, dest, NULL);
     path_join(g_log_path, dest, L"setup.log");
     DeleteFileW(g_log_path);
-    swprintf(cmd, sizeof cmd / sizeof cmd[0],
-             L"\"%ls\" -u -X utf8 \"%ls\" --rom \"%ls\" --dest \"%ls\" --clang \"%ls\" --n64recomp \"%ls\"",
-             py, script, rom, dest, clang, recomp);
-    if (bios[0]) {
-        size_t n = wcslen(cmd);
-        swprintf(cmd + n, sizeof cmd / sizeof cmd[0] - n, L" --bios \"%ls\"", bios);
+    HANDLE probe = CreateFileW(g_log_path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
+    if (probe == INVALID_HANDLE_VALUE) {
+        (void)made;
+        swprintf(g_error, 1024, L"Setup can't write to %ls. Choose a folder of your own, for example one in Documents or "
+                                L"on another drive (folders like Program Files need administrator rights).", dest);
+        return 0;
     }
+    CloseHandle(probe);
+    const size_t cap = sizeof cmd / sizeof cmd[0];
+    swprintf(cmd, cap, L"\"%ls\" -u -X utf8", py);
+    add_arg(cmd, cap, NULL, script);
+    add_arg(cmd, cap, L"--rom", rom);
+    add_arg(cmd, cap, L"--dest", dest);
+    add_arg(cmd, cap, L"--clang", clang);
+    add_arg(cmd, cap, L"--n64recomp", recomp);
+    if (bios[0]) add_arg(cmd, cap, L"--bios", bios);
 
     SECURITY_ATTRIBUTES sa = {sizeof sa, NULL, TRUE};
     HANDLE rd, wr;
@@ -334,11 +367,22 @@ static void make_shortcut(int csidl, const wchar_t *exe, const wchar_t *dir) {
     IShellLinkW_Release(sl);
 }
 
-static void remove_shortcut(int csidl) {
-    wchar_t folder[MAX_PATH], lnk[MAX_PATH];
+/* Removes the shortcut only if it starts the game in `dir` (another install's shortcut is left alone). */
+static void remove_shortcut(int csidl, const wchar_t *dir) {
+    wchar_t folder[MAX_PATH], lnk[MAX_PATH], target[MAX_PATH] = L"", mine[MAX_PATH];
     if (FAILED(SHGetFolderPathW(NULL, csidl, NULL, 0, folder))) return;
     path_join(lnk, folder, P_PRODUCT L".lnk");
-    DeleteFileW(lnk);
+    if (!file_exists(lnk)) return;
+    IShellLinkW *sl;
+    if (FAILED(CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&sl))) return;
+    IPersistFile *pf;
+    if (SUCCEEDED(IShellLinkW_QueryInterface(sl, &IID_IPersistFile, (void **)&pf))) {
+        if (SUCCEEDED(IPersistFile_Load(pf, lnk, STGM_READ))) IShellLinkW_GetPath(sl, target, MAX_PATH, NULL, SLGP_RAWPATH);
+        IPersistFile_Release(pf);
+    }
+    IShellLinkW_Release(sl);
+    path_join(mine, dir, P_EXE);
+    if (!_wcsicmp(target, mine)) DeleteFileW(lnk);
 }
 
 static void reg_str(HKEY k, const wchar_t *name, const wchar_t *v) {
@@ -384,30 +428,60 @@ static void delete_tree(const wchar_t *dir, const wchar_t *name) {
     SHFileOperationW(&op);
 }
 
-static int uninstall(const wchar_t *dir) {
-    if (MessageBoxW(NULL, L"Remove " P_PRODUCT L" from this PC?", P_PRODUCT, MB_YESNO | MB_ICONQUESTION) != IDYES)
+/* The scratch folder of a build: deleted only if it carries Setup's own marker file. */
+static void delete_scratch(const wchar_t *dir) {
+    wchar_t mark[MAX_PATH];
+    swprintf(mark, MAX_PATH, L"%ls\\_build\\.setup-scratch", dir);
+    if (file_exists(mark)) delete_tree(dir, L"_build");
+}
+
+/* quiet: no questions and no message (settings are kept unless purge). */
+static int uninstall(const wchar_t *dir, int quiet, int purge) {
+    wchar_t game[MAX_PATH];
+    path_join(game, dir, P_EXE);
+    if (!file_exists(game)) {          /* not an install folder: never delete things from anywhere else */
+        if (!quiet) MessageBoxW(NULL, P_PRODUCT L" isn't installed in this folder.", P_PRODUCT, MB_OK | MB_ICONINFORMATION);
         return 1;
-    int saves = MessageBoxW(NULL, L"Also delete your settings, controls and the game's saved settings and scores?\n\n"
+    }
+    if (!quiet && MessageBoxW(NULL, L"Remove " P_PRODUCT L" from this PC?", P_PRODUCT, MB_YESNO | MB_ICONQUESTION) != IDYES)
+        return 1;
+    int saves = quiet ? purge :
+                MessageBoxW(NULL, L"Also delete your settings, controls and the game's saved settings and scores?\n\n"
                                   L"Choose No to keep them for next time.",
                             P_PRODUCT, MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
     static const wchar_t *files[] = {P_EXE, L"setup.log", L"buriki.log", L"buriki.old.log", L"nvram.bin.tmp",
                                      L"menu_art.png", L"menu_art.jpg", L"menu_art.jpeg"};
     for (unsigned i = 0; i < sizeof files / sizeof files[0]; i++) delete_in(dir, files[i]);
-    /* folders: the ROM data unpacked from the player's sets, a build that was interrupted, and the (empty) log
-     * folder the NVIDIA driver leaves in the folder a game runs from */
-    static const wchar_t *dirs[] = {L"roms", L"_build", L"NVIDIA Corporation"};
-    for (unsigned i = 0; i < sizeof dirs / sizeof dirs[0]; i++) delete_tree(dir, dirs[i]);
+    /* folders: the ROM data unpacked from the player's sets (just the two folders Setup made; "roms" itself only
+     * if that leaves it empty), a build that was interrupted, and the log folder the NVIDIA driver leaves in the
+     * folder a game runs from */
+    wchar_t roms[MAX_PATH];
+    path_join(roms, dir, L"roms");
+    delete_tree(roms, L"buriki");
+    delete_tree(roms, L"hng64");
+    RemoveDirectoryW(roms);
+    delete_scratch(dir);
+    delete_tree(dir, L"NVIDIA Corporation");
     if (saves) {
         delete_in(dir, L"settings.ini");
         delete_in(dir, L"controls.ini");
         delete_in(dir, L"nvram.bin");
     }
-    remove_shortcut(CSIDL_DESKTOPDIRECTORY);
-    remove_shortcut(CSIDL_PROGRAMS);
-    RegDeleteKeyW(HKEY_CURRENT_USER, UNINSTALL_KEY);
-    MessageBoxW(NULL, saves ? P_PRODUCT L" has been removed." :
-                              P_PRODUCT L" has been removed. Your settings were kept in its folder.",
-                P_PRODUCT, MB_OK | MB_ICONINFORMATION);
+    remove_shortcut(CSIDL_DESKTOPDIRECTORY, dir);
+    remove_shortcut(CSIDL_PROGRAMS, dir);
+    /* the Apps entry: only if it is this folder's (an older install elsewhere mustn't remove a newer one's) */
+    HKEY k;
+    if (!RegOpenKeyExW(HKEY_CURRENT_USER, UNINSTALL_KEY, 0, KEY_READ, &k)) {
+        wchar_t loc[MAX_PATH] = L"";
+        DWORD size = sizeof loc;
+        RegQueryValueExW(k, L"InstallLocation", NULL, NULL, (BYTE *)loc, &size);
+        RegCloseKey(k);
+        if (!_wcsicmp(loc, dir)) RegDeleteKeyW(HKEY_CURRENT_USER, UNINSTALL_KEY);
+    }
+    if (!quiet)
+        MessageBoxW(NULL, saves ? P_PRODUCT L" has been removed." :
+                                  P_PRODUCT L" has been removed. Your settings were kept in its folder.",
+                    P_PRODUCT, MB_OK | MB_ICONINFORMATION);
     /* this program is <dir>\Uninstall.exe and can't delete itself while running: a hidden cmd does it after */
     wchar_t cmd[3 * MAX_PATH], sysdir[MAX_PATH];
     GetSystemDirectoryW(sysdir, MAX_PATH);
@@ -475,7 +549,7 @@ static void browse_dest(void) {
                 /* picking "D:\Games" installs into "D:\Games\<product>" */
                 wchar_t full[MAX_PATH];
                 const wchar_t *base = wcsrchr(p, L'\\');
-                if (base && !_wcsicmp(base + 1, P_PRODUCT)) wcsncpy(full, p, MAX_PATH);
+                if (base && !_wcsicmp(base + 1, P_PRODUCT)) { wcsncpy(full, p, MAX_PATH - 1); full[MAX_PATH - 1] = 0; }
                 else swprintf(full, MAX_PATH, L"%ls%ls%ls", p, p[wcslen(p) - 1] == L'\\' ? L"" : L"\\", P_PRODUCT);
                 SetWindowTextW(g_dest, full);
                 CoTaskMemFree(p);
@@ -484,6 +558,29 @@ static void browse_dest(void) {
         }
     }
     IFileOpenDialog_Release(d);
+}
+
+/* Does the folder hold anything that isn't Setup's? (No game exe, and more than a stopped install's leftovers.)
+ * Setup replaces roms\buriki, roms\hng64 and _build inside its install folder, so it only installs into a folder
+ * that is new, empty, or already this game's. build_from_rom.py checks the same. */
+static int has_other_files(const wchar_t *dir) {
+    wchar_t p[MAX_PATH];
+    path_join(p, dir, P_EXE);
+    if (file_exists(p)) return 0;
+    swprintf(p, MAX_PATH, L"%ls\\_build\\.setup-scratch", dir);
+    int scratch_ok = file_exists(p);
+    path_join(p, dir, L"*");
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(p, &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int other = 0;
+    do {
+        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..") || !_wcsicmp(fd.cFileName, L"setup.log")) continue;
+        if (scratch_ok && !_wcsicmp(fd.cFileName, L"_build")) continue;
+        other = 1;
+    } while (!other && FindNextFileW(h, &fd));
+    FindClose(h);
+    return other;
 }
 
 static void go(void) {
@@ -510,7 +607,36 @@ static void go(void) {
         else g_exit_code = 2, DestroyWindow(g_wnd);
         return;
     }
-    if (!dest[0]) return;
+    /* the install folder: trimmed, made absolute, without a trailing backslash (except a drive's root) */
+    {
+        wchar_t *b = dest;
+        while (*b == L' ' || *b == L'"') b++;
+        size_t n = wcslen(b);
+        while (n && (b[n - 1] == L' ' || b[n - 1] == L'"')) b[--n] = 0;
+        if (!n) return;
+        wchar_t full[MAX_PATH];
+        DWORD got = GetFullPathNameW(b, MAX_PATH, full, NULL);
+        if (!got || got >= MAX_PATH - 40) {     /* room for the game's own files below it */
+            if (!g_silent) MessageBoxW(g_wnd, L"That folder's path is too long. Choose a shorter one.", APP_TITLE, MB_OK | MB_ICONINFORMATION);
+            else g_exit_code = 2, DestroyWindow(g_wnd);
+            return;
+        }
+        n = wcslen(full);
+        while (n > 3 && full[n - 1] == L'\\') full[--n] = 0;
+        wcscpy(dest, full);
+        SetWindowTextW(g_dest, dest);
+        if (has_other_files(dest)) {
+            /* offer a folder of its own inside the one chosen, and let the player look before going on */
+            wchar_t sub[MAX_PATH], msg[2 * MAX_PATH + 200];
+            path_join(sub, dest, P_PRODUCT);
+            swprintf(msg, sizeof msg / sizeof msg[0], L"%ls already has other files in it.\n\nSetup will install into its own "
+                     L"folder there instead:\n%ls\n\nPress Install again to go ahead.", dest, sub);
+            if (g_silent) { g_exit_code = 2; DestroyWindow(g_wnd); return; }
+            SetWindowTextW(g_dest, sub);
+            MessageBoxW(g_wnd, msg, APP_TITLE, MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+    }
     g_error[0] = 0;
     g_done_exe[0] = 0;
     g_pct = 0;
@@ -788,7 +914,22 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         DestroyWindow(h);
         return 0;
     case WM_DESTROY:
-        if (g_job) CloseHandle(g_job);      /* kills the build if it is still running */
+        if (g_job) {                        /* a build is still running: stop it and remove what it was making */
+            HANDLE child = g_child;
+            CloseHandle(g_job);             /* kills Python and the compilers */
+            g_job = NULL;
+            if (child) WaitForSingleObject(child, 5000);
+            wchar_t dest[MAX_PATH];
+            GetWindowTextW(g_dest, dest, MAX_PATH);
+            Sleep(200);                     /* the compilers' files are released a moment after they stop */
+            delete_scratch(dest);
+            wchar_t game[MAX_PATH];
+            path_join(game, dest, P_EXE);
+            if (!file_exists(game)) {       /* nothing was installed there before: leave no empty folder behind */
+                delete_in(dest, L"setup.log");
+                RemoveDirectoryW(dest);
+            }
+        }
         PostQuitMessage(0);
         return 0;
     }
@@ -835,11 +976,18 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
     int argc;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     wchar_t rom[MAX_PATH] = L"", bios[MAX_PATH] = L"", dest[MAX_PATH] = L"";
-    int bios_given = 0;
+    int bios_given = 0, want_uninstall = 0, purge = 0;
+    {   /* the copy Setup leaves in the install folder is named Uninstall.exe: run on its own, it uninstalls */
+        wchar_t self[MAX_PATH];
+        GetModuleFileNameW(NULL, self, MAX_PATH);
+        const wchar_t *base = wcsrchr(self, L'\\');
+        if (base && !_wcsicmp(base + 1, L"Uninstall.exe")) want_uninstall = 1;
+    }
     for (int i = 1; i < argc; i++) {
         const wchar_t *v;
-        if (!_wcsicmp(argv[i], L"/uninstall")) return uninstall(g_setup_dir);
-        if ((v = arg_value(argv[i], L"/rom="))) wcsncpy(rom, v, MAX_PATH - 1);
+        if (!_wcsicmp(argv[i], L"/uninstall")) want_uninstall = 1;
+        else if (!_wcsicmp(argv[i], L"/purge")) purge = 1;
+        else if ((v = arg_value(argv[i], L"/rom="))) wcsncpy(rom, v, MAX_PATH - 1);
         else if ((v = arg_value(argv[i], L"/bios="))) wcsncpy(bios, v, MAX_PATH - 1), bios_given = 1;
         else if ((v = arg_value(argv[i], L"/dest="))) wcsncpy(dest, v, MAX_PATH - 1);
         else if ((v = arg_value(argv[i], L"/shot="))) wcsncpy(g_shot, v, MAX_PATH - 1);
@@ -847,6 +995,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
         else if (!_wcsicmp(argv[i], L"/noshortcuts")) g_no_shortcuts = 1;
         else if (!_wcsicmp(argv[i], L"/noregister")) g_no_register = 1;
     }
+    if (want_uninstall) return uninstall(g_setup_dir, g_silent, purge);
     if (!rom[0]) guess_rom(rom, L"buriki.zip");
     if (!bios_given) guess_rom(bios, L"hng64.zip");
     if (!dest[0]) {
@@ -861,6 +1010,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
     g_dpi = GetDeviceCaps(sdc, LOGPIXELSY);
     ReleaseDC(NULL, sdc);
     measure_art();
+    {   /* on a small or heavily scaled desktop, draw everything a little smaller so the whole window fits */
+        RECT wa;
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+        int fit_w = MulDiv(wa.right - wa.left - 16, 96, g_win_w), fit_h = MulDiv(wa.bottom - wa.top - 48, 96, WIN_H);
+        if (fit_w < g_dpi) g_dpi = fit_w;
+        if (fit_h < g_dpi) g_dpi = fit_h;
+        if (g_dpi < 60) g_dpi = 60;
+    }
 
     WNDCLASSW wc = {0};
     wc.lpfnWndProc = wndproc;

@@ -49,5 +49,9 @@ void fe_nvram_save(void);
 const char* fe_nvram_path(void);       // nullptr when off
 const char* fe_default_nvram_path(void);   // nvram.bin next to the exe
 
+// main.cpp: stderr is the log file next to the exe. "Restart game" then lets go of it before starting the new
+// copy, which moves it to buriki.old.log and opens its own.
+void fe_note_log_file(bool on);
+
 // Volume for audio_out (0-100, mute folded in).
 int fe_volume(void);

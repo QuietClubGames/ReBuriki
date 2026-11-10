@@ -1,5 +1,6 @@
 # --- Game content: never commit (copyrighted; everyone uses their own dump) ---
 *.zip
+*.bin
 roms/
 work/
 # C translated from the game's program, and files generated from it

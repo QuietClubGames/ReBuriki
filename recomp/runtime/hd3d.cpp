@@ -316,8 +316,9 @@ bool wide_scene(const HdLayers& L, const HdTri* tris, size_t ntri) {
 }
 
 bool ensure_targets(int w, int h, int samples) {
-    if (w == g_rt_w && h == g_rt_h && samples == g_rt_samples && g_rtv_ms) return true;
+    if (w == g_rt_w && h == g_rt_h && samples == g_rt_samples && g_rtv_ms && g_dsv_ms && g_srv_res) return true;
     release(g_rtv_ms); release(g_rt_ms); release(g_dsv_ms); release(g_ds_ms); release(g_srv_res); release(g_rt_res);
+    g_rt_w = g_rt_h = g_rt_samples = 0;       // nothing usable until all three are made again
     UINT q = 0;
     if (samples > 1 && (FAILED(g_dev->CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, samples, &q)) || q == 0)) samples = 1;
     D3D11_TEXTURE2D_DESC d = {};
@@ -366,9 +367,23 @@ bool hd_draw(ID3D11RenderTargetView* target, int vx, int vy, int vw, int vh) {
 
     // 3D target: the 512x512 buffer covers the picture width and 512/448 of its height.
     // Quality Auto = the output resolution; presets = a fixed multiple of the arcade's 512 lines.
-    const int q = fe_setting_quality_scale();
-    const int rw = q ? (int)(512 * q * wide + 0.5f) : vw, rh = q ? 512 * q : (int)(vh * 512.0f / 448.0f + 0.5f);
-    if (rw < 64 || rh < 64 || !ensure_targets(rw, rh, 4)) return false;
+    // If the graphics card can't provide a target that big (Extreme in widescreen is over a gigabyte with
+    // anti-aliasing), step down a preset at a time and remember the limit, instead of dropping to the
+    // original picture or asking again every frame.
+    static int scale_limit = 8;
+    int q = fe_setting_quality_scale();
+    if (q > scale_limit) q = scale_limit;
+    int rw, rh;
+    for (;;) {
+        rw = q ? (int)(512 * q * wide + 0.5f) : vw;
+        rh = q ? 512 * q : (int)(vh * 512.0f / 448.0f + 0.5f);
+        if (rw < 64 || rh < 64) return false;
+        if (ensure_targets(rw, rh, 4)) break;
+        if (q <= 2) return false;             // Auto (the window's own size) or the smallest preset failed
+        q = q > 4 ? q - 2 : q - 1;            // presets are 8, 6, 4, 3, 2
+        scale_limit = q;
+        fprintf(stderr, "[hd] not enough video memory for that quality; using %dx\n", q);
+    }
 
     upload(g_tex_pal, L.pal_3d, 256 * 4, 256);
     upload(g_tex_below, L.below, L.width * 4, 448);

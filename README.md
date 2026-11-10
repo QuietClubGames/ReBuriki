@@ -1,0 +1,162 @@
+<div align="center">
+
+# ReBuriki
+
+**Buriki One, rebuilt for Windows.**<br>
+An unofficial PC version of SNK's 1999 Hyper Neo Geo 64 arcade fighter.
+
+[![Latest release](https://img.shields.io/github/v/release/QuietClubGames/ReBuriki?label=download&style=for-the-badge&color=e8a33d)](../../releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/QuietClubGames/ReBuriki/total?style=for-the-badge&color=4c8bf5)](../../releases)
+![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white)
+
+**[Download](../../releases/latest)** · [Install](#install) · [The menu](#the-menu) · [Controls](#controls) · [FAQ](#faq) · [For developers](docs/DEVELOPING.md)
+
+</div>
+
+> [!IMPORTANT]
+> ReBuriki does **not** include the game. You need your own legally obtained copies of two arcade ROM sets, as
+> MAME names them: `buriki.zip` (Buriki One, rev. B) and `hng64.zip` (the Hyper Neo Geo 64 system ROMs). Setup
+> builds the game from them on your PC.
+
+## What ReBuriki adds
+
+| | |
+|---|---|
+| **Sharper 3D** | The fighters are redrawn on your graphics card at your screen's resolution, with smooth edges and textures. Or keep the original picture (F9 switches). |
+| **Widescreen** | Fights fill a 16:9 screen, up to 21:9, with more of the arena at the sides. The health bars can stay where the arcade put them or sit at the screen edges. |
+| **Your screen, your way** | Window, borderless or exclusive full screen; 4:3, stretched or pixel-perfect scaling; sharp, smooth or scanline filter. |
+| **English or Japanese** | Choose the board's region from the menu. |
+| **Controllers** | Xbox-style controllers for two players, keyboard, and remapping for both. |
+| **Arcade settings** | Free play, difficulty, attack power, timer speed and more from an in-game menu, plus an option to have the hidden fighter Silber from the start. |
+| **Native** | Not an emulator: the arcade code is recompiled into a Windows program. |
+
+## Install
+
+1. Download **`ReBuriki-Setup.zip`** from the [latest release](../../releases/latest) and unzip it anywhere.
+2. Run **`Setup.exe`**.
+3. Choose your `buriki.zip` and `hng64.zip` and where to install, then press **Install**. It takes a minute or
+   two and adds desktop and Start menu shortcuts. No administrator rights are needed.
+
+Any MAME version's sets work as long as they are complete: Setup finds the files it needs by checksum, whatever
+they are named. `hng64.zip` must include the I/O board file `tmp87ph40an.bin`.
+
+> [!NOTE]
+> Setup isn't code-signed, so Windows may show **"Windows protected your PC"**. Choose **More info**, then
+> **Run anyway**. If your antivirus blocks `Setup.exe`, that is an automatic guess about new, unsigned
+> programs: allow it in the antivirus's history list and run Setup again. Please don't turn your antivirus off.
+
+To uninstall: **Windows Settings → Apps → ReBuriki (Buriki One PC port) → Uninstall**.
+
+## The menu
+
+Press **Back + Start** together on a controller (View + Menu on newer Xbox pads), or **Tab** / **Esc** on the
+keyboard. The game pauses while the menu is open.
+
+| | Controller | Keyboard |
+|---|---|---|
+| Move | D-pad or stick | Arrow keys |
+| Choose | A | Enter |
+| Back | B | Esc |
+| Switch pages | LB / RB | Q / E |
+| Close | Start | Tab |
+
+| Page | What's there |
+|---|---|
+| **Display** | Window / borderless / exclusive full screen, window size, monitor, picture shape (4:3, stretch, whole-number, widescreen), where the health bars sit in widescreen, enhanced or original graphics, quality, screen filter, frame pacing, graphics card, frame-rate counter |
+| **Audio** | Volume, mute |
+| **Controls** | Change any key or controller button, stick dead zone, restore defaults |
+| **Game** | Unlock Silber, free play, language / region (applies after a restart) |
+| **Rules** | The arcade operator's settings: difficulty, attack power and timer speed (1 player and versus), continue, replay, blood, move commands on screen, sound in the title demo |
+| **System** | Resume, the arcade's operator menu, restart, quit |
+
+## Controls
+
+Insert a coin, then press Start. With free play on, Start alone is enough. The first controller is player 1,
+the second is player 2.
+
+Buriki One plays differently from most fighting games: the buttons move your fighter and the stick attacks.
+The game's own "How to play" screens show the moves.
+
+| | Controller | Keyboard (player 1) | Keyboard (player 2) |
+|---|---|---|---|
+| Stick | D-pad or left stick | Arrow keys | R F D G (up, down, left, right) |
+| Buttons 1 2 3 4 | X Y A B | Z X C V | A S Q W |
+| Start | Start | 1 | 2 |
+| Insert coin | Back | 5 | 6 |
+| Menu | Back + Start | Tab or Esc | |
+
+| Key | Does |
+|---|---|
+| Alt+Enter or F11 | Window / full screen |
+| F9 | Enhanced graphics on / off |
+| F2 | The arcade's Test button (operator menu) |
+| 9 | The arcade's Service button |
+
+## FAQ
+
+<details>
+<summary><b>Is this an emulator?</b></summary>
+
+No. ReBuriki is a *static recompilation*: a tool translates the arcade game's MIPS processor code into C,
+which is compiled into a native Windows program, with the arcade hardware (graphics, sound, inputs) replaced
+by portable code. This happens on your PC when you install, from your own ROMs.
+</details>
+
+<details>
+<summary><b>Which ROMs do I need?</b></summary>
+
+The MAME sets `buriki.zip` (Buriki One: World Grapple Tournament '99 in Tokyo, rev. B) and `hng64.zip` (the
+Hyper Neo Geo 64 system ROMs). Please don't ask where to get them.
+</details>
+
+<details>
+<summary><b>How do I play as Silber?</b></summary>
+
+He is the twelfth style, "Original Karate", at the bottom of the list on the player select screen. The menu's
+"Unlock Silber" option (Game page) is on by default. Turn it off to earn him the arcade's way; what you have
+earned is kept either way.
+</details>
+
+<details>
+<summary><b>My controller doesn't work.</b></summary>
+
+ReBuriki recognises Xbox-style (XInput) controllers. PlayStation controllers work through Steam or a tool such
+as DS4Windows, and many arcade sticks have an XInput mode. The keyboard always works.
+</details>
+
+<details>
+<summary><b>Where are my settings saved?</b></summary>
+
+In the install folder: `settings.ini` (menu settings), `controls.ini` (keys and buttons) and `nvram.bin` (the
+arcade's own settings and records).
+</details>
+
+<details>
+<summary><b>What do I need to run it?</b></summary>
+
+64-bit Windows 10 or 11 and a graphics card with Direct3D 11. Without one the game falls back to the original
+picture.
+</details>
+
+<details>
+<summary><b>Is anything missing compared with the arcade?</b></summary>
+
+The sound chip's echo effect isn't reproduced yet (no emulator has it). Everything else is believed to match;
+reports are welcome.
+</details>
+
+<details>
+<summary><b>Something went wrong. How do I report it?</b></summary>
+
+Open an [issue](../../issues) and attach `buriki.log` from the install folder (the previous run's is
+`buriki.old.log`), and `setup.log` if the problem was with installing.
+</details>
+
+## About
+
+ReBuriki was made with Claude, Anthropic's AI model. Its licences are in [LICENSE.md](LICENSE.md): the
+project's own code is MIT, and the parts ported from MAME keep MAME's licences. The licences cover ReBuriki
+only, not the game. Building it yourself is described in [docs/DEVELOPING.md](docs/DEVELOPING.md).
+
+<sub>ReBuriki is a fan project, not affiliated with or endorsed by SNK. Buriki One and Hyper Neo Geo 64 are
+trademarks of their owners.</sub>

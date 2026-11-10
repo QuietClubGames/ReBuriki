@@ -35,6 +35,10 @@ void hw_game_option_set(int option, int value);   // saved (nvram) and applied t
 // Called with the message just before hw_fatal exits (main.cpp shows it in a message box when the
 // game runs without a console, as the installed game does).
 extern void (*g_fatal_hook)(const char* message);
+// Claims the one fatal-error report. false = another thread is already reporting one (and will exit): the
+// caller should just wait. Stops a second message appearing while the first is still on screen.
+bool hw_fatal_claim(void);
+bool hw_fatal_busy(void);
 
 // ---- setup ---------------------------------------------------------------------------
 struct HwConfig {

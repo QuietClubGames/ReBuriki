@@ -7,6 +7,7 @@
 #include "funcs.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -15,6 +16,7 @@
 #include <ctime>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 extern "C" {
@@ -545,7 +547,14 @@ static void hw_debug_frame() {
 
 void (*g_fatal_hook)(const char* message) = nullptr;
 
+static std::atomic<bool> g_fatal_claimed{false};
+bool hw_fatal_claim(void) { return !g_fatal_claimed.exchange(true); }
+bool hw_fatal_busy(void) { return g_fatal_claimed.load(); }
+
 void hw_fatal(const char* fmt, ...) {
+    // Only the first fatal error is reported. A second one (the watchdog noticing that the game has
+    // stopped, because the first error's message box is open) waits here until the program exits.
+    if (!hw_fatal_claim()) for (;;) std::this_thread::sleep_for(std::chrono::hours(1));
     char msg[1024];
     va_list ap;
     va_start(ap, fmt);
@@ -653,7 +662,11 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
             static bool on = getenv("BURIKI_LOGVBL") != nullptr;
             static std::map<std::string, int> hist;
             if (on) {
-                hist[cur_func()]++;
+                // (with the game's stack pointer: the same function at the same stack depth every frame means
+                // the game is at the same place in the same chain of calls, which matters for save states)
+                char key[96];
+                snprintf(key, sizeof key, "%s sp=%08X", cur_func(), (uint32_t)ctx->r29);
+                hist[key]++;
                 if (g_frame % 600 == 0) {
                     std::vector<std::pair<int, std::string>> v;
                     for (auto& [k, n] : hist) v.push_back({n, k});
@@ -667,10 +680,12 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
         }
         if (g_frame % 600 == 0) {   // speed report every 10 s of game time (wall clock, display only)
             static auto last = std::chrono::steady_clock::now();
+            static bool first = true;       // the first call only starts the clock (no time has passed yet)
             auto now = std::chrono::steady_clock::now();
             double s = std::chrono::duration<double>(now - last).count();
             last = now;
-            fprintf(stderr, "[perf] frames %u-%u: %.0f fps | video %.0f%% sound %.0f%% io %.0f%% other (game) %.0f%%\n",
+            if (first || s <= 0) { first = false; g_perf_video = g_perf_sound = g_perf_io = 0; }
+            else fprintf(stderr, "[perf] frames %u-%u: %.0f fps | video %.0f%% sound %.0f%% io %.0f%% other (game) %.0f%%\n",
                     g_frame - 600, g_frame, 600.0 / s, 100 * g_perf_video / s, 100 * g_perf_sound / s, 100 * g_perf_io / s,
                     100 * (s - g_perf_video - g_perf_sound - g_perf_io) / s);
             g_perf_video = g_perf_sound = g_perf_io = 0;

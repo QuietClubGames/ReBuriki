@@ -25,6 +25,7 @@ import struct
 import subprocess
 import sys
 import time
+import traceback
 import zipfile
 import zlib
 
@@ -75,6 +76,8 @@ def progress(pct, text):
 
 
 _cleanup = []     # the scratch folder, removed if the build stops (unless --keep-work)
+SCRATCH = "_build"
+SCRATCH_MARK = ".setup-scratch"     # in <dest>/_build: Setup made this folder, so Setup may delete it
 
 
 def fail(text):
@@ -84,7 +87,14 @@ def fail(text):
     sys.exit(1)
 
 
-def run(cmd, cwd, what, env=None):
+def plain_path_hint(path):
+    """Older Windows versions can't give the build tools a folder name with letters outside the PC's own set."""
+    if path.isascii():
+        return ""
+    return " Try an install folder whose path has only plain English letters, such as C:\\Games\\" + product.PRODUCT + "."
+
+
+def run(cmd, cwd, what, env=None, hint=""):
     """Run a step, echoing its output into the log; stop with a readable error if it fails."""
     say("> " + " ".join(os.path.basename(c) if i == 0 else c for i, c in enumerate(cmd)))
     p = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -92,7 +102,7 @@ def run(cmd, cwd, what, env=None):
     if p.stdout:
         say(p.stdout.rstrip())
     if p.returncode != 0:
-        fail(f"{what} failed (see setup.log).")
+        fail(f"{what} failed (see setup.log).{hint}")
     return p.stdout or ""
 
 
@@ -163,13 +173,19 @@ def unpack(found, folder, name, size, crc):
     os.makedirs(folder, exist_ok=True)
     out = os.path.join(folder, name)
     check = 0
-    with z.open(info) as src, open(out, "wb") as dst:
-        while True:
-            block = src.read(1 << 20)
-            if not block:
-                break
-            check = zlib.crc32(block, check)
-            dst.write(block)
+    try:
+        with z.open(info) as src, open(out, "wb") as dst:
+            while True:
+                block = src.read(1 << 20)
+                if not block:
+                    break
+                check = zlib.crc32(block, check)
+                dst.write(block)
+    except (zipfile.BadZipFile, zlib.error, EOFError):
+        check = None                                   # damaged data inside the zip
+    except (NotImplementedError, RuntimeError) as e:   # a compression method or encryption Python can't read
+        say(f"{name}: {e}")
+        fail(f"{name} is packed in the zip in a way Setup can't read. Unpack the set and zip it again normally.")
     if check != crc:
         fail(f"{name} did not unpack correctly (the zip file may be damaged).")
     return out
@@ -244,7 +260,25 @@ def compile_all(build, clangxx, jobs):
     return objs
 
 
+# The manifest makes Windows (10 version 1903 and later) give the game its file paths as UTF-8, so it
+# runs from folders whose names have characters outside the PC's own code page (a user name in another
+# alphabet, for example). The game's code uses the ordinary narrow file functions throughout.
+# It also declares the game DPI-aware: on a display scaled to 125% or more, Windows would otherwise
+# draw the game at a lower resolution and stretch it, blurring the picture.
+GAME_MANIFEST = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>
+"""
+
 GAME_RC = """%(icon)s
+1 24 "game.manifest"
 1 VERSIONINFO
 FILEVERSION %(n)s
 PRODUCTVERSION %(n)s
@@ -279,16 +313,21 @@ def resource_object(build, clangxx):
     if not os.path.isfile(windres):
         return []
     ico = os.path.join(HERE, "game.ico")
+    have_icon = os.path.isfile(ico)
+    if have_icon:
+        shutil.copyfile(ico, os.path.join(build, "game.ico"))
+    with open(os.path.join(build, "game.manifest"), "w", encoding="ascii") as f:
+        f.write(GAME_MANIFEST)
     v = product.VERSION
     rc = os.path.join(build, "game.rc")
-    with open(rc, "w", encoding="utf-8") as f:
+    with open(rc, "w", encoding="ascii") as f:
         f.write(GAME_RC % {
-            "icon": '1 ICON "%s"' % ico.replace("\\", "/") if os.path.isfile(ico) else "",
+            "icon": '1 ICON "game.ico"' if have_icon else "",
             "n": ",".join((v.split(".") + ["0", "0", "0"])[:4]), "v": v, "publisher": product.PUBLISHER,
             "description": product.DESCRIPTION, "product": product.PRODUCT, "copyright": product.COPYRIGHT,
             "exe": product.EXE})
     obj = os.path.join(build, "game_res.o")
-    p = subprocess.run([windres, "--no-preprocess", "--target=pe-x86-64", rc, "-O", "coff", "-o", obj],
+    p = subprocess.run([windres, "--no-preprocess", "--target=pe-x86-64", "game.rc", "-O", "coff", "-o", "game_res.o"],
                        cwd=build, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                        creationflags=NO_WINDOW)
     if p.returncode != 0:
@@ -306,6 +345,45 @@ def link(build, clangxx, objs, exe):
     # -static: the C++ runtime goes into the exe (no DLLs to ship); -mwindows: no console window
     run([clangxx, "-O2", "-static", "-mwindows", "@" + rsp, "-o", exe] + ["-l" + l for l in LIBS], build,
         "Linking the game")
+
+
+def check_dest(dest):
+    """Setup deletes and replaces things inside its install folder (roms/buriki, roms/hng64, _build), so it only
+    installs into a folder that is new, empty, already holds this game, or holds only what a stopped install
+    left. Anything else (someone's MAME folder, say) is refused."""
+    if not os.path.isdir(dest) or os.path.isfile(os.path.join(dest, product.EXE)):
+        return
+    ours = {"setup.log"}
+    if os.path.isfile(os.path.join(dest, SCRATCH, SCRATCH_MARK)):
+        ours.add(SCRATCH.lower())
+    others = [n for n in os.listdir(dest) if n.lower() not in ours]
+    if others:
+        say(f"the install folder has other files in it: {others[:8]}")
+        fail(f"{dest} already has other files in it. Choose an empty or new folder for the game, for example "
+             f"{os.path.join(dest, product.PRODUCT)}")
+
+
+def install(build, roms, exe_tmp, dest):
+    exe = os.path.join(dest, product.EXE)
+    if os.path.exists(exe):                       # before touching anything: can the old game be replaced?
+        try:
+            open(exe, "ab").close()
+        except OSError:
+            fail(f"{product.PRODUCT} is running. Close the game, then press Try again.")
+    for sub in ("buriki", "hng64"):               # the ROM data: only these two folders are ever replaced
+        target = os.path.join(dest, "roms", sub)
+        if os.path.isdir(target):
+            try:
+                shutil.rmtree(target)
+            except OSError as e:
+                say(f"{target}: {e}")
+                fail(f"Setup couldn't replace the old ROM data in {target}. Close anything that has that folder "
+                     "open, then press Try again.")
+        if os.path.isdir(os.path.join(roms, sub)):
+            os.makedirs(os.path.join(dest, "roms"), exist_ok=True)
+            shutil.move(os.path.join(roms, sub), target)
+    shutil.copyfile(exe_tmp, exe)
+    return exe
 
 
 # ------------------------------------------------------------------
@@ -336,11 +414,12 @@ def main():
         fail("Setup's files folder is incomplete (the compiler or the translator is missing). "
              "Unzip the whole Setup download again.")
     jobs = a.jobs or max(1, min(os.cpu_count() or 2, int(total_ram_gb() / 1.5)))   # up to ~1 GB per compile
-    build = os.path.join(dest, "_build")
+    build = os.path.join(dest, SCRATCH)
     say(f"{product.PRODUCT} {product.VERSION} build: rom={rom} bios={bios} dest={dest} clang={clangxx} "
         f"jobs={jobs} python={sys.executable}")
 
     progress(1, "Preparing")
+    check_dest(dest)
     if os.path.isdir(build):
         shutil.rmtree(build)
     rdir = os.path.join(build, "recomp")
@@ -349,6 +428,7 @@ def main():
     hdr = os.path.join(rdir, "gen_runtime")
     os.makedirs(hdr)
     os.makedirs(work)
+    open(os.path.join(build, SCRATCH_MARK), "w").close()
     if not a.keep_work:
         _cleanup.append(build)
     shutil.copyfile(os.path.join(SRC, "recomp", "buriki.toml"), os.path.join(rdir, "buriki.toml"))
@@ -377,9 +457,9 @@ def main():
         rdir, "Preparing the translator", env)
 
     progress(22, "Translating the game's code to C")
-    out = run([recomp_exe, "buriki.toml"], rdir, "Translating the game", env)
+    out = run([recomp_exe, "buriki.toml"], rdir, "Translating the game", env, hint=plain_path_hint(dest))
     if "Error" in out:
-        fail("Translating the game failed (see setup.log).")
+        fail("Translating the game failed (see setup.log)." + plain_path_hint(dest))
     run(py + [os.path.join(tools, "fix_generated.py"), "generated"], rdir, "Tidying the translated code", env)
 
     progress(34, "Compiling the game")
@@ -395,15 +475,10 @@ def main():
                        creationflags=NO_WINDOW, timeout=300)
     say("\n".join((p.stdout or "").splitlines()[-12:]))
     if p.returncode != 0:
-        fail("The game was built but did not start correctly (see setup.log).")
+        fail("The game was built but did not start correctly (see setup.log)." + plain_path_hint(dest))
 
     progress(96, "Installing")
-    os.makedirs(dest, exist_ok=True)
-    dest_roms = os.path.join(dest, "roms")
-    shutil.rmtree(dest_roms, ignore_errors=True)           # only ROM files live there
-    shutil.move(roms, dest_roms)
-    exe = os.path.join(dest, product.EXE)
-    shutil.copyfile(exe_tmp, exe)
+    exe = install(build, roms, exe_tmp, dest)
     if not a.keep_work:
         shutil.rmtree(build, ignore_errors=True)
     say(f"built in {time.time() - t0:.0f} s")
@@ -412,4 +487,18 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except subprocess.TimeoutExpired:
+        fail("A step took far too long and was stopped (see setup.log).")
+    except OSError as e:                         # anything not handled where it happened
+        say(traceback.format_exc())
+        if e.errno == 28 or getattr(e, "winerror", 0) in (39, 112):
+            fail("The disk is full. Setup needs about 500 MB free in the install folder.")
+        if isinstance(e, PermissionError):
+            fail("Setup isn't allowed to write to the install folder. Choose a folder of your own, such as one "
+                 "in Documents or on another drive.")
+        fail(f"Setup couldn't write its files: {e.strerror or e} (see setup.log).")
+    except Exception:
+        say(traceback.format_exc())
+        fail("Setup ran into a problem it didn't expect (see setup.log).")

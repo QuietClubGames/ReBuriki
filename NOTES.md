@@ -627,3 +627,81 @@ Read from the game's code and confirmed by running it. Addresses are for rev. B.
   delay effect work?", "delay effect parameters, unknown encoding"). Writing one from this alone
   would be invention. It needs a recording of a real board to match against, or documentation of
   the Akai S3000's effect section, which the chip comes from.
+
+## Release test pass and review fixes (2026-11-10)
+
+### What was run
+
+- **Soak:** 30,050 frames headless with the soak script: no crash, NaN or stall; all 50 frames
+  shared with `frames_soak_ref` byte-identical. Again after the fixes below (12,050 frames, 20
+  frames identical).
+- **The pause menu driven by `--test-keys`:** picture shape through to Widescreen, HUD to the
+  screen edges, Unlock Silber off and on, Free play on, difficulty and attack power changed, then
+  a game started with Start alone, Silber picked and a fight played. All took effect live.
+- **Modes, each a 2,500-frame windowed run, exit 0:** regions Japan / USA / World; Original
+  graphics with Widescreen (stays 4:3); Stretch; whole-number + scanlines; Smooth + widescreen +
+  edge HUD; quality Performance and Extreme in widescreen; borderless full screen; the GDI
+  fallback; sound on; vsync pacing. Missing ROM folder: plain message, exit 3.
+- **Two players:** versus fight in widescreen with the HUD at the edges; both sides mirror.
+- **The user's own install** (`F:\NonSteam\Buriki One\ReBuriki`, the 13:42 build, read-only look
+  at its logs): 76,200 frames (21 minutes) at a steady 59 fps, no errors. So a click-through
+  install with shortcuts and the Apps entry works. That copy predates Silber, the Rules page and
+  the edge HUD.
+- **Installer edge cases** (silent, temp folder, PATH cut down, never registering):
+  - a folder with spaces, letters outside the code page and a trailing backslash: installs, and
+    the game runs and logs from it;
+  - a folder with other files in it (a `roms` folder): refused before anything is created;
+  - reinstall over an install: settings kept;
+  - `Uninstall.exe /silent`: game and ROM data removed, settings and save kept, another
+    install's shortcut and Apps entry untouched;
+  - uninstall from a folder that isn't an install: nothing touched;
+  - a damaged zip: plain message, scratch folder removed.
+
+### Fixed from an independent review of the session's code (a subagent, read-only)
+
+- **Setup could delete someone else's `roms` folder.** Install and uninstall removed `<dest>\roms`
+  and `_build` whole. Now Setup only installs into a folder that is new, empty, already this
+  game's, or a stopped install's leftovers (`has_other_files` in `setup_win32.c`, `check_dest`
+  in `build_from_rom.py`); only `roms\buriki` and `roms\hng64` are ever replaced or removed; the
+  scratch folder carries a marker file (`_build\.setup-scratch`) and is only deleted with it;
+  uninstall does nothing unless the game's exe is in its folder.
+- **Folder names outside the PC's code page** broke the build (N64Recomp) and the game (narrow
+  file functions). The game and the packaged N64Recomp.exe now carry a manifest with
+  `activeCodePage` UTF-8 (Windows 10 1903+). On older Windows the error message suggests a
+  plain-letter folder. The game's icon and manifest are copied next to its `.rc`.
+- **The game's manifest also declares it DPI-aware**, so a display scaled to 125%+ no longer
+  gets a stretched, blurry picture. Not tested on a scaled display (this PC is at 100%).
+- **A trailing backslash on the install folder** broke the build's command line. Arguments are
+  now quoted properly (`add_arg`), and the folder is trimmed and made absolute.
+- **Unexpected problems in the build script** (game running during a reinstall, damaged or
+  oddly packed zips, disk full, no write access, timeouts) now end in a plain message and
+  remove the scratch folder. The game exe is checked for being in use before the ROM data is
+  touched.
+- **Closing Setup during a build** now removes the scratch folder (and the folder itself if
+  nothing was installed there before). Not tested: it needs a click on a question box.
+- **Uninstall:** running the copy named `Uninstall.exe` on its own uninstalls; `/silent` and
+  `/purge` added; the Apps entry and shortcuts are only removed if they belong to that folder.
+- **A second "stuck" message box** appeared over any fatal error (the watchdog firing while the
+  first box was open). One error is reported at a time now (`hw_fatal_claim`).
+- **The window's system menu held open for 3 s** stopped the game as "stuck". A 250 ms window
+  timer keeps the activity counter moving in Windows' own modal loops. Not tested by hand.
+- **`buriki.log`** is written unbuffered, so it is complete after a Task Manager kill; "Restart
+  game" lets go of it first so the new copy can keep it as `buriki.old.log`; if it can't be
+  opened the error box still shows. A player's log has 40 hardware-trace lines instead of 300,
+  and the first `[perf]` line no longer prints garbage.
+- **The HD renderer** no longer keeps stale sizes after a failed render-target allocation, and
+  steps the quality down (8, 6, 4, 3, 2) when the card can't provide the target, remembering the
+  limit.
+- Setup scales itself down to fit small or heavily scaled desktops; one unterminated copy in
+  the folder picker fixed; `*.bin` is gitignored and dumps / saves are never packaged.
+- Left as is: the one-frame lag of the edge HUD when a scene turns wide or back (cosmetic).
+
+### For netplay later: where a frame ends
+
+`BURIKI_LOGVBL=1` now prints the game's stack pointer with the function it is in at each vblank.
+Over 12,000 frames of the soak script, every frame of every fight ended in the idle loop
+`func_800C5C20` with the same stack pointer (803FFFC0): 600 of 600 in each window from frame
+2400 to 9600. Outside fights (boot, scene loads, select and result screens) a handful of
+frames per 600 end elsewhere, at other depths. So during fights the game is always at the same
+place in the same chain of calls when a frame ends, which is what a save state without copying
+the host stack needs. Not yet tried: actually saving and restoring.

@@ -243,6 +243,11 @@ void fe_window_open(void) {
                           r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
     QueryPerformanceFrequency(&g_freq);
     timeBeginPeriod(1);              // 1 ms Sleep granularity (default is ~15.6 ms)
+    // A timer message four times a second. While Windows runs one of its own loops on this thread (the
+    // window's system menu, a caption button held down), the game stands still but these still arrive, and
+    // every message counts as activity (wndproc), so the "stuck" watchdog in main.cpp isn't fooled into
+    // stopping the game. A game that really hangs never gets back to its message loop, so they stop too.
+    if (g_wnd) SetTimer(g_wnd, 1, 250, nullptr);
     if (!g_wnd) { fe_log("video: couldn't create the window"); exit(1); }
     g_hz = getenv("BURIKI_FORCE_HZ") ? atoi(getenv("BURIKI_FORCE_HZ")) : display_hz();
     g_use_d3d = getenv("BURIKI_FORCE_GDI") ? 0 : d3d_init(g_wnd, g_hz, g_settings.gpu);

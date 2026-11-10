@@ -43,6 +43,7 @@
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>
 #endif
 #include "hw.h"
 #include "video.h"
@@ -54,6 +55,7 @@ static recomp_context g_ctx;
 
 #ifdef _WIN32
 static bool g_log_to_file = false;     // no console: stderr goes to buriki.log
+static bool g_no_console = false;      // no console at all (the installed game): errors are shown in a message box
 
 static std::string exe_dir() {
     char exe[MAX_PATH];
@@ -63,9 +65,9 @@ static std::string exe_dir() {
 }
 
 static void fatal_box(const char* message) {
-    if (!g_log_to_file) return;
+    if (!g_no_console) return;
     std::string text = std::string("Buriki One has to stop:\n\n") + message +
-                       "\n\nThe details are in buriki.log, in the game's folder.";
+                       (g_log_to_file ? "\n\nThe details are in buriki.log, in the game's folder." : "");
     MessageBoxA(nullptr, text.c_str(), "Buriki One", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
 }
 
@@ -75,9 +77,11 @@ static LONG WINAPI on_crash(EXCEPTION_POINTERS* e) {
     hw_dump_recent_functions();
     hw_report();
     fflush(stderr);
-    char msg[96];
-    snprintf(msg, sizeof msg, "the program crashed (error %08lX).", e->ExceptionRecord->ExceptionCode);
-    fatal_box(msg);
+    if (hw_fatal_claim()) {             // (not while another error's message is already up)
+        char msg[96];
+        snprintf(msg, sizeof msg, "the program crashed (error %08lX).", e->ExceptionRecord->ExceptionCode);
+        fatal_box(msg);
+    }
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -85,9 +89,20 @@ static LONG WINAPI on_crash(EXCEPTION_POINTERS* e) {
 static void log_to_file_if_no_console() {
     HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
     if (h != nullptr && h != INVALID_HANDLE_VALUE) return;      // a console, or redirected by a test
+    g_no_console = true;
     const std::string log = exe_dir() + "buriki.log", old = exe_dir() + "buriki.old.log";
     MoveFileExA(log.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING);
-    if (freopen(log.c_str(), "w", stderr)) g_log_to_file = true;
+    if (freopen(log.c_str(), "w", stderr)) {
+        g_log_to_file = true;
+        // Written straight through, so the file is complete even if the game is ended from Task Manager.
+        // (Windows has no line buffering for files, and little is printed once the game is running.)
+        setvbuf(stderr, nullptr, _IONBF, 0);
+        // Not handed on to the copy that "Restart game" starts: it opens its own.
+        SetHandleInformation((HANDLE)_get_osfhandle(_fileno(stderr)), HANDLE_FLAG_INHERIT, 0);
+        fe_note_log_file(true);
+    } else {
+        freopen("NUL", "w", stderr);    // nowhere to write (a read-only folder): don't write to a dead handle
+    }
     freopen("NUL", "w", stdout);
 }
 
@@ -115,6 +130,9 @@ int main(int argc, char** argv) {
     cfg.max_frames = 0;
     cfg.ticks_per_frame = 50000;
     cfg.io_log_limit = 300;
+#ifdef _WIN32
+    if (g_log_to_file) cfg.io_log_limit = 40;   // a player's buriki.log: enough to see the boot, without 300 lines of it
+#endif
     bool no_sound = false;
     FeOptions fe;
     const char* nvram = nullptr;
@@ -151,9 +169,11 @@ int main(int argc, char** argv) {
         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 1; }
     }
     cfg.sound_play = !no_sound && !g_video_cfg.headless;
-    setvbuf(stderr, nullptr, _IOLBF, 1 << 16);
 #ifdef _WIN32
+    if (!g_log_to_file) setvbuf(stderr, nullptr, _IOLBF, 1 << 16);
     SetUnhandledExceptionFilter(on_crash);
+#else
+    setvbuf(stderr, nullptr, _IOLBF, 1 << 16);
 #endif
 
     // Front end: settings.ini / controls.ini next to the exe. Headless runs keep their old defaults (Japanese
@@ -192,6 +212,7 @@ int main(int argc, char** argv) {
         int still = 0;
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (hw_fatal_busy()) continue;                     // an error is already being reported
             uint64_t now = g_ticks, fe_now = fe_activity();   // the pause menu stops game time on purpose
             still = (now == last && fe_now == last_fe) ? still + 1 : 0;
             last = now;

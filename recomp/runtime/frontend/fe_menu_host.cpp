@@ -59,6 +59,9 @@ static void host_operator_menu(void) { ui_key(UI_CLOSE, UI_DEV_KEYBOARD); g_test
 
 // Restart: start a new copy of the program with the same command line, then quit. (The recompiled game runs
 // on this thread's stack from its entry point, so a fresh process is the clean way to power-cycle the board.)
+static bool g_log_file;
+void fe_note_log_file(bool on) { g_log_file = on; }
+
 static void host_restart(void) {
     if (!g_no_save) settings_save(&g_settings, fe_path("settings.ini").c_str());
     fe_nvram_save();
@@ -71,7 +74,10 @@ static void host_restart(void) {
     fe_log("restarting");
     fflush(stderr);
     d3d_shutdown();                  // give up exclusive full screen before the new copy wants it
-    if (CreateProcessW(exe, cmd, nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
+    // Let go of the log file first: the new copy keeps this session's log as buriki.old.log and starts its own,
+    // which it can't do while this copy still has the file open.
+    if (g_log_file) freopen("NUL", "w", stderr);
+    if (CreateProcessW(exe, cmd, nullptr, nullptr, g_log_file ? FALSE : TRUE, 0, nullptr, nullptr, &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         exit(0);
