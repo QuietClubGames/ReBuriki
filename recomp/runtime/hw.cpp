@@ -363,6 +363,58 @@ void hw_note_nan(const char* func, void* vctx) {
     }
 }
 
+// Diagnostics for finding and testing game variables, run at the end of each frame:
+//   BURIKI_RAMDUMP=dir:f1,f2,...   save main RAM as dir/ram_NNNNN.bin on those frames, big-endian
+//                                  (the byte at RAM address A is at file offset A)
+//   BURIKI_POKE=f0-f1:ADDR=VV;...  on frames f0..f1 write the hex byte VV to RAM address ADDR (hex,
+//                                  with or without the 0x80000000). More than two hex digits: 16 or
+//                                  32 bits, big-endian. Changes the game: for experiments only.
+static void hw_debug_frame() {
+    struct Poke { uint32_t f0, f1, addr, val; int bytes; };
+    static std::vector<uint32_t> dump_frames;
+    static std::string dump_dir;
+    static std::vector<Poke> pokes;
+    static bool init = false;
+    if (!init) {
+        init = true;
+        if (const char* e = getenv("BURIKI_RAMDUMP")) {
+            std::string t = e;
+            size_t c = t.rfind(':');
+            if (c != std::string::npos) {
+                dump_dir = t.substr(0, c);
+                for (char* q = strtok(&t[c + 1], ","); q; q = strtok(nullptr, ",")) dump_frames.push_back((uint32_t)atoi(q));
+            }
+        }
+        if (const char* e = getenv("BURIKI_POKE")) {
+            std::string t = e;
+            for (char* q = strtok(&t[0], ";"); q; q = strtok(nullptr, ";")) {
+                Poke k{};
+                char val[32] = {0};
+                if (sscanf(q, "%u-%u:%x=%31s", &k.f0, &k.f1, &k.addr, val) == 4) {
+                    k.val = (uint32_t)strtoul(val, nullptr, 16);
+                    k.bytes = strlen(val) <= 2 ? 1 : strlen(val) <= 4 ? 2 : 4;
+                    k.addr &= HW_RAM_SIZE - 1;
+                    pokes.push_back(k);
+                    fprintf(stderr, "[poke] frames %u-%u: %08X = %0*X\n", k.f0, k.f1, 0x80000000u | k.addr, k.bytes * 2, k.val);
+                }
+            }
+        }
+    }
+    for (const Poke& k : pokes)
+        if (g_frame >= k.f0 && g_frame <= k.f1)
+            for (int i = 0; i < k.bytes; i++) g_ram[(k.addr + i) ^ 3] = (uint8_t)(k.val >> (8 * (k.bytes - 1 - i)));
+    if (std::find(dump_frames.begin(), dump_frames.end(), g_frame) != dump_frames.end()) {
+        char name[64];
+        snprintf(name, sizeof name, "/ram_%05u.bin", g_frame);
+        if (FILE* f = fopen((dump_dir + name).c_str(), "wb")) {
+            std::vector<uint8_t> be(HW_RAM_SIZE);
+            for (uint32_t i = 0; i < HW_RAM_SIZE; i++) be[i] = g_ram[i ^ 3];
+            fwrite(be.data(), 1, be.size(), f);
+            fclose(f);
+        }
+    }
+}
+
 void (*g_fatal_hook)(const char* message) = nullptr;
 
 void hw_fatal(const char* fmt, ...) {
@@ -495,6 +547,7 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
                     100 * (s - g_perf_video - g_perf_sound - g_perf_io) / s);
             g_perf_video = g_perf_sound = g_perf_io = 0;
         }
+        hw_debug_frame();
         if (g_cfg.max_frames && g_frame >= g_cfg.max_frames) {
             // Fingerprint of main RAM: two runs with the same inputs must print the same value.
             uint64_t h = 1469598103934665603ull;
