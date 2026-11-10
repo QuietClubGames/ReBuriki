@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -215,6 +217,20 @@ void L7A1045::voiceregs_w(int offset, uint16_t data) {
     uint64_t& r = m_regs[m_cur_register][m_cur_channel];
     r &= offset_mask[offset];
     r |= (uint64_t(data) << (offset * 16));
+
+    // Diagnostics (env BURIKI_LOGFX): what the game asks of the delay effect, which isn't emulated
+    // (MAME: "How does the delay effect work?"). Register 7 with destination 0xF sends a voice to
+    // it; register A sets up its taps. Each distinct value is printed once.
+    static const bool logfx = getenv("BURIKI_LOGFX") != nullptr;
+    if (logfx && offset == 0 && (m_cur_register == 0xA || (m_cur_register == L6028_Mixer_Params && ((r >> 16) & 0xF) == 0xF))) {
+        static std::array<uint64_t, 512> seen{};
+        static int n = 0;
+        const uint64_t key = (uint64_t(m_cur_register) << 56) | (uint64_t(m_cur_channel) << 48) | (r & 0xffffffffffffULL);
+        if (n < (int)seen.size() && std::find(seen.begin(), seen.begin() + n, key) == seen.begin() + n) {
+            seen[n++] = key;
+            fprintf(stderr, "[fx] reg %X voice %2d = %012llX\n", m_cur_register, m_cur_channel, (unsigned long long)r);
+        }
+    }
 
     switch (m_cur_register) {
     case L6028_Start:

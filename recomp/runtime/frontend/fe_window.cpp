@@ -359,9 +359,9 @@ static void menu_test_tick() {
         snprintf(page, sizeof page, "%s", g_opt.menu_test);
         int dev = UI_DEV_KEYBOARD;
         if (char* c = strchr(page, ':')) { *c = 0; if (!strcmp(c + 1, "pad")) dev = UI_DEV_PAD; }
-        static const char* names[] = {"display", "audio", "controls", "game", "system"};
+        static const char* names[] = {"display", "audio", "controls", "game", "rules", "system"};
         int idx = -1;
-        for (int i = 0; i < 5; i++) if (!strcmp(page, names[i])) idx = i;
+        for (int i = 0; i < UI_PAGE_COUNT; i++) if (!strcmp(page, names[i])) idx = i;
         bool capture = !strcmp(page, "capture");
         if (capture) idx = UI_PAGE_CONTROLS;
         if (!strcmp(page, "pause")) idx = UI_PAGE_SYSTEM;

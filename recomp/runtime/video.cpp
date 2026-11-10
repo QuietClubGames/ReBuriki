@@ -206,6 +206,7 @@ bool g_arena = false;          // this frame has a perspective ("floor" mode) ti
 // columns beyond the visible area are drawn on each side.
 int g_stride = VIDEO_W, g_xoff = 0, g_ext = 0;
 int g_spr_ext = 0;             // the same margin for the sprite buffer
+int g_hud_shift_wanted = 0;    // "HUD at the screen edges": pixels to move the side parts out (0 = off)
 
 constexpr u32 OVER_OPAQUE = 0xFF000000u, OVER_HALF = 0xC0000000u, OVER_ADD = 0x80000000u;
 
@@ -556,7 +557,26 @@ void draw_sprites_line(int y) {
     }
 }
 
-void draw_sprites_buffer() {
+// "HUD at the screen edges" (widescreen): how far to move one front-layer sprite sideways.
+// The fight display is all sprites in the front priority groups (0-3): the two monitor boxes and
+// the clock along the top, the health bars, names and credit text along the bottom, and the
+// "second system" guide beside each fighter. Its left-hand parts move left and its right-hand
+// parts move right by `shift`; the clock and anything that sits across the middle of the screen
+// (K.O., banners, the coin prompt) stay where they are.
+//   top band (ends above line 80):    left / right of the clock's zone (x 192-320)
+//   bottom band (starts at line 360): left / right half
+//   middle (lines 200-350):           only what lies wholly left of x 208 or right of x 304 (the
+//                                     button guides, whose circles wander a little)
+int hud_shift_for(int x, int y, int w, int h, int shift) {
+    if (x < 256 && x + w > 256) return 0;                 // across the middle
+    const int cx = x + w / 2;
+    if (y + h <= 80) return cx < 192 ? -shift : cx >= 320 ? shift : 0;
+    if (y >= 360) return cx < 256 ? -shift : shift;
+    if (y >= 200 && y + h <= 350) return x + w <= 208 ? -shift : x >= 304 ? shift : 0;
+    return 0;
+}
+
+void draw_sprites_buffer(int hud_shift = 0) {
     memset(m_sprite_bitmap, 0, sizeof(m_sprite_bitmap));
     const int spriteoffsx = (m_spriteregs[1] >> 0) & 0xffff;
     const int spriteoffsy = (m_spriteregs[1] >> 16) & 0xffff;
@@ -600,6 +620,10 @@ void draw_sprites_buffer() {
         // MAME draws each sprite's rows here, top to bottom. We queue the sprite and draw all
         // sprites line by line below (in parallel); per line they're still drawn in this order,
         // so the z-buffer results are identical.
+        if (hud_shift && group < 0x4000) {                // a front-layer sprite: part of the fight display?
+            const int width = (int)(((int64_t)(chainx + 1) * 0x100000 + dx - 1) / dx);
+            xpos = (s16)(xpos + hud_shift_for(xpos, ypos, width, (int)full_dstheight, hud_shift));
+        }
         g_sprite_jobs.push_back({currentsprite, ypos, xpos, (int)full_dstheight, dx, dy, chainx, chainy, chaini,
                                  xflip, yflip, zval, blend, group, checkerboard, mosaic});
         currentsprite = nextsprite;
@@ -774,6 +798,9 @@ void screen_update(bool split) {
         for (int y = 0; y < VIDEO_H; y++) memcpy(&g_bitmap[y * VIDEO_W], &g_below_w[y * WIDE_W + WIDE_M], VIDEO_W * sizeof(u32));
         draw_3d_layer();
         draw_front_layers();
+        // HUD at the screen edges: the sprites once more, with the fight display's side parts moved
+        // out, for the wide front layer only (the normal picture above is finished and untouched).
+        if (g_hud_shift_wanted > 0 && g_arena) draw_sprites_buffer(std::min(g_hud_shift_wanted, WIDE_M));
         memset(g_over_w, 0, sizeof(g_over_w));
         draw_to_wide(g_over_w); g_over_mode = true;
         draw_front_layers();
@@ -938,7 +965,7 @@ void log_video_state() {
     memcpy(last, cur, sizeof(cur));
 }
 
-void video_set_wide_layers(bool on) { g_wide_wanted = on; }
+void video_set_wide_layers(bool on, int hud_shift) { g_wide_wanted = on; g_hud_shift_wanted = on ? hud_shift : 0; }
 
 bool video_hd_layers(HdLayers* out) {
     if (!g_layers_ok) return false;

@@ -28,6 +28,7 @@ bool fe_setting_enhanced();             // Graphics: Enhanced (true) / Original 
 int  fe_setting_quality();              // 0 Auto, 1 Performance, 2 Balanced, 3 High, 4 Ultra, 5 Extreme
 int  fe_setting_quality_scale();        // render scale for that preset: 0 (Auto), 2, 3, 4, 6, 8
 int  fe_setting_filter();               // 0 Sharp, 1 Smooth, 2 Scanlines (scanlines are drawn on top for you)
+bool fe_setting_hud_edges();           // widescreen: health bars and boxes at the screen edges
 int  fe_setting_aspect();               // 0 Arcade 4:3, 1 Stretch, 2 4:3 whole-number scale (already in x/y/w/h),
                                         // 3 Widescreen: x/y/w/h is the window's shape, from 4:3 up to 21:9; the
                                         // hook widens the 3D view to fill it, or draws 4:3 in its middle

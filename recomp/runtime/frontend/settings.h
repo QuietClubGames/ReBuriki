@@ -16,6 +16,7 @@ struct Settings {
     int window_size;      // index into the window sizes (fe_window.cpp)
     int monitor;          // 0 = the monitor the window is on / primary, else 1-based display number
     int aspect;           // ASPECT_*
+    int hud_edges;        // widescreen: 1 = the fight display (health bars, boxes) sits at the screen edges, 0 = arcade position
     int enhanced;         // 1 = high-resolution renderer (when one is plugged in, see hd_hook.h), 0 = original picture
     int quality;          // QUALITY_* (render scale for the high-resolution renderer; Auto adapts)
     int filter;           // FILTER_*

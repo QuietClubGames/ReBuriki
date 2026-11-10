@@ -295,6 +295,7 @@ int fe_setting_quality() { return g_settings.quality; }
 int fe_setting_quality_scale() { return settings_quality_scale(g_settings.quality); }
 int fe_setting_filter() { return g_settings.filter; }
 int fe_setting_aspect() { return g_settings.aspect; }
+bool fe_setting_hud_edges() { return g_settings.hud_edges != 0; }
 
 ID3D11Device* d3d_dev(void) { return dev; }
 ID3D11DeviceContext* d3d_ctx(void) { return ctx; }

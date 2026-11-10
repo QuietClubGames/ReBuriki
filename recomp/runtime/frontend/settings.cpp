@@ -36,6 +36,7 @@ static const struct { const char* key; size_t ofs; int lo, hi; } k_fields[] = {
     {"window_size", offsetof(Settings, window_size), 0, 5},
     {"monitor", offsetof(Settings, monitor), 0, 16},
     {"picture_shape", offsetof(Settings, aspect), 0, 3},
+    {"widescreen_hud_edges", offsetof(Settings, hud_edges), 0, 1},
     {"enhanced_graphics", offsetof(Settings, enhanced), 0, 1},
     {"quality", offsetof(Settings, quality), 0, 5},
     {"screen_filter", offsetof(Settings, filter), 0, 2},

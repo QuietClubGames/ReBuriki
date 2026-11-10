@@ -2,6 +2,7 @@
 // Reference: MAME src/mame/snk/hng64.cpp (main_map, sysregs, irqc, dmac, dualport, rtc).
 #include "hw.h"
 #include "input.h"
+#include "video.h"
 #include "menu_art.h"
 #include "funcs.h"
 
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <map>
 #include <string>
 #include <vector>
@@ -155,6 +157,40 @@ void do_dma() {
     g_dma_dst += words * 4;
 }
 
+// The board's clock/calendar chip (Epson RTC62423, MSM6242-compatible): sixteen 4-bit registers.
+// 0-B: seconds, minutes, hours, day, month, year as two decimal digits each (units first);
+// C: day of the week (0 = Sunday); D-F: control (F bit 2 = 24-hour mode).
+// With a window it shows the PC's clock, read once per frame so the digits belong together.
+// Headless runs (and BURIKI_RTC=0) keep the old all-zero clock, so test runs don't depend on
+// the time of day. The game only uses it for the operator's bookkeeping dates and the calendar
+// screen; writes (the Test menu's CALENDAR SETTING) are ignored.
+int rtc_read(int reg) {
+    static const bool real = [] {
+        const char* e = getenv("BURIKI_RTC");
+        return e ? atoi(e) != 0 : !g_video_cfg.headless;
+    }();
+    if (!real) return 0;
+    static uint32_t frame = ~0u;
+    static struct tm now;
+    if (frame != g_frame) {
+        frame = g_frame;
+        const time_t t = time(nullptr);
+        if (const struct tm* lt = localtime(&t)) now = *lt;
+    }
+    const int year = now.tm_year % 100, month = now.tm_mon + 1;
+    switch (reg) {
+    case 0x0: return now.tm_sec % 10;   case 0x1: return now.tm_sec / 10;
+    case 0x2: return now.tm_min % 10;   case 0x3: return now.tm_min / 10;
+    case 0x4: return now.tm_hour % 10;  case 0x5: return now.tm_hour / 10;
+    case 0x6: return now.tm_mday % 10;  case 0x7: return now.tm_mday / 10;
+    case 0x8: return month % 10;        case 0x9: return month / 10;
+    case 0xA: return year % 10;         case 0xB: return year / 10;
+    case 0xC: return now.tm_wday;
+    case 0xF: return 4;                 // 24-hour mode
+    default: return 0;                  // D, E: not busy, no interrupt
+    }
+}
+
 // Returns true and sets v if the register has special read behaviour.
 bool read_hook(uint32_t pa, uint32_t& v) {
     switch (pa) {
@@ -168,7 +204,11 @@ bool read_hook(uint32_t pa, uint32_t& v) {
         v = sound_main_read(pa); return true;              // main <-> sound CPU latches
     }
     if (pa - 0x1F702100u < 0x80) {                         // RTC: 1 nibble in every 8 bytes
-        if ((pa >> 2) & 1) { v = (((pa - 0x1F702100u) >> 3) & 0xF) == 0xD ? 0x10 : 0; }
+        if ((pa >> 2) & 1) {
+            const int reg = ((pa - 0x1F702100u) >> 3) & 0xF;
+            // bit 4 on register D: MAME's "disables the system log reader" bit (not from the chip)
+            v = (uint32_t)rtc_read(reg) | (reg == 0xD ? 0x10 : 0);
+        }
         else v = 0xFFFFFFFF;
         return true;
     }
@@ -320,6 +360,58 @@ void hw_set_unlock_silber(bool on) {
     else *cache &= (uint16_t)~SILBER_BIT;
 }
 
+// ---- the arcade's operator settings ---------------------------------------------------------
+// Found by changing each option in the Test menu and comparing the save memory (NOTES.md,
+// "Arcade options"). Each is one byte in the nvram; at power on the game copies them into RAM
+// and from then on reads only the copies, so a change is written to both: the nvram byte keeps
+// it for next time and the RAM byte makes it apply now (the game looks most of them up when a
+// fight or screen starts). There is no checksum. Addresses are for Buriki One rev. B.
+//   coin settings: nvram 0x2030 + n  <->  RAM 0x801446E0 + n     (free play = +2)
+//   game options:  nvram 0x2050 + n  <->  RAM 0x801446F0 + n     (in the Test menu's order)
+// LANGUAGE (0x2059) is left to the Test menu on purpose: changing it while the game runs sends
+// the game to resources it hasn't loaded (it stops with a bad read).
+namespace {
+struct GameOption { uint16_t nv; uint32_t ram; uint8_t lo, hi; };
+const GameOption k_game_options[GOPT_COUNT] = {
+    {0x2032, 0x1446E2, 0, 1},   // FREE PLAY         0 off, 1 on
+    {0x2050, 0x1446F0, 1, 4},   // DIFFICULTY        1 easy, 2 normal, 3 hard, 4 hardest
+    {0x2051, 0x1446F1, 0, 1},   // DEMO SOUND        0 off, 1 on
+    {0x2052, 0x1446F2, 0, 1},   // COMMAND DISP.     0 without, 1 with
+    {0x2053, 0x1446F3, 1, 3},   // ATTACK POWER CPU  1 light, 2 normal, 3 heavy
+    {0x2054, 0x1446F4, 1, 3},   // ATTACK POWER VS.
+    {0x2055, 0x1446F5, 1, 3},   // PLAY TIME CPU     1 slow, 2 normal, 3 quick
+    {0x2056, 0x1446F6, 1, 3},   // PLAY TIME VS.
+    {0x2057, 0x1446F7, 0, 1},   // REPLAY            0 off, 1 on
+    {0x2058, 0x1446F8, 0, 1},   // CONTINUE          0 off, 1 on
+    {0x205D, 0x1446FD, 0, 1},   // BLOOD DISP.       0 off, 1 on
+};
+uint8_t* nvram_byte(uint32_t off) { return (uint8_t*)hw_phys_words(0x1F800000 + (off & ~3u)) + ((off & 3) ^ 3); }
+}
+
+// Ready = the saved difficulty is a real value and the game's RAM copy agrees with it (so the
+// game has set up or loaded its settings, and isn't in the middle of initialising them).
+bool hw_game_options_ready(void) {
+    if (!g_ram) return false;
+    const GameOption& d = k_game_options[GOPT_DIFFICULTY];
+    const uint8_t v = *nvram_byte(d.nv);
+    return v >= d.lo && v <= d.hi && g_ram[d.ram ^ 3] == v;
+}
+
+int hw_game_option_get(int option) {
+    if (option < 0 || option >= GOPT_COUNT || !hw_game_options_ready()) return -1;
+    return *nvram_byte(k_game_options[option].nv);
+}
+
+void hw_game_option_set(int option, int value) {
+    if (option < 0 || option >= GOPT_COUNT || !hw_game_options_ready()) return;
+    const GameOption& o = k_game_options[option];
+    if (value < o.lo) value = o.lo;
+    if (value > o.hi) value = o.hi;
+    *nvram_byte(o.nv) = (uint8_t)value;
+    g_ram[o.ram ^ 3] = (uint8_t)value;
+    fprintf(stderr, "[options] arcade option %d = %d\n", option, value);
+}
+
 void hw_tlb_write(uint32_t index, uint32_t pagemask, uint32_t entryhi, uint32_t phys0, uint32_t phys1) {
     if (index >= 48) hw_fatal("TLB index %u out of range", index);
     g_tlb[index] = {true, pagemask, entryhi & 0xFFFFE000u, phys0, phys1};
@@ -399,7 +491,7 @@ void hw_note_nan(const char* func, void* vctx) {
 //   BURIKI_RAMDUMP=dir:f1,f2,...   save main RAM as dir/ram_NNNNN.bin on those frames, big-endian
 //                                  (the byte at RAM address A is at file offset A)
 //   BURIKI_POKE=f0-f1:ADDR=VV;...  on frames f0..f1 write the hex byte VV to RAM address ADDR (hex,
-//                                  with or without the 0x80000000). More than two hex digits: 16 or
+//                                  with or without the 0x80000000; 1F80xxxx = the save memory). More than two hex digits: 16 or
 //                                  32 bits, big-endian. Changes the game: for experiments only.
 static void hw_debug_frame() {
     struct Poke { uint32_t f0, f1, addr, val; int bytes; };
@@ -425,7 +517,7 @@ static void hw_debug_frame() {
                 if (sscanf(q, "%u-%u:%x=%31s", &k.f0, &k.f1, &k.addr, val) == 4) {
                     k.val = (uint32_t)strtoul(val, nullptr, 16);
                     k.bytes = strlen(val) <= 2 ? 1 : strlen(val) <= 4 ? 2 : 4;
-                    k.addr &= HW_RAM_SIZE - 1;
+                    if ((k.addr >> 16) != 0x1F80) k.addr &= HW_RAM_SIZE - 1;   // 1F80xxxx: the save memory
                     pokes.push_back(k);
                     fprintf(stderr, "[poke] frames %u-%u: %08X = %0*X\n", k.f0, k.f1, 0x80000000u | k.addr, k.bytes * 2, k.val);
                 }
@@ -434,7 +526,11 @@ static void hw_debug_frame() {
     }
     for (const Poke& k : pokes)
         if (g_frame >= k.f0 && g_frame <= k.f1)
-            for (int i = 0; i < k.bytes; i++) g_ram[(k.addr + i) ^ 3] = (uint8_t)(k.val >> (8 * (k.bytes - 1 - i)));
+            for (int i = 0; i < k.bytes; i++) {
+                const uint8_t b = (uint8_t)(k.val >> (8 * (k.bytes - 1 - i)));
+                if ((k.addr >> 16) == 0x1F80) ((uint8_t*)hw_phys_words((k.addr + i) & ~3u))[((k.addr + i) & 3) ^ 3] = b;
+                else g_ram[(k.addr + i) ^ 3] = b;
+            }
     if (std::find(dump_frames.begin(), dump_frames.end(), g_frame) != dump_frames.end()) {
         char name[64];
         snprintf(name, sizeof name, "/ram_%05u.bin", g_frame);

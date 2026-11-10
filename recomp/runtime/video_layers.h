@@ -19,7 +19,10 @@ struct HdLayers {
 };
 
 // Widescreen: draw the 2D layers with HD_WIDE_MARGIN extra columns each side from the next frame on.
-void video_set_wide_layers(bool on);
+// hud_shift > 0 ("HUD at the screen edges"): in the front layer, the fight display's left-hand and
+// right-hand parts are drawn that many pixels further out (video.cpp, hud_shift_for). Pass 0
+// whenever the frame isn't being shown wide.
+void video_set_wide_layers(bool on, int hud_shift);
 
 // Fill in this frame's layers. false = the frame can't be split (screen off, etc.): show the
 // normal 512x448 picture instead.

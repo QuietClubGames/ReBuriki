@@ -67,6 +67,8 @@ ACCESS(display_mode, display_mode)
 ACCESS(window_size, window_size)
 ACCESS(monitor, monitor)
 ACCESS(aspect, aspect)
+ACCESS(hud_edges, hud_edges)
+static int widescreen_on(void) { return g_settings.aspect == ASPECT_WIDE; }
 ACCESS(quality, quality)
 ACCESS(filter, filter)
 ACCESS(pacing, pacing)
@@ -86,6 +88,33 @@ static int get_player(void) { return g_ctl_player; }
 static void set_player(int v) { g_ctl_player = v; }
 
 ACCESS(unlock_silber, unlock_silber)
+
+// The arcade's own operator settings (hw.cpp: hw_game_option_*), shown as rows on the Game and Rules pages.
+// They live in the arcade's save memory, not settings.ini, so the Test menu and these rows always agree.
+// (declared here as in ../hw.h, which this platform-independent file doesn't include)
+enum { GOPT_FREE_PLAY, GOPT_DIFFICULTY, GOPT_DEMO_SOUND, GOPT_COMMAND_DISPLAY, GOPT_ATTACK_CPU, GOPT_ATTACK_VS,
+       GOPT_TIME_CPU, GOPT_TIME_VS, GOPT_REPLAY, GOPT_CONTINUE, GOPT_BLOOD };
+extern "C" {
+bool hw_game_options_ready(void);
+int  hw_game_option_get(int option);
+void hw_game_option_set(int option, int value);
+}
+static int rules_ready(void) { return hw_game_options_ready(); }
+// `first` = the game's number for the first choice (0 for off / on, 1 for easy / light / slow)
+#define GAME_OPTION(name, id, first) \
+    static int get_##name(void) { int v = hw_game_option_get(id); return v < first ? 0 : v - first; } \
+    static void set_##name(int v) { hw_game_option_set(id, v + first); }
+GAME_OPTION(free_play, GOPT_FREE_PLAY, 0)
+GAME_OPTION(difficulty, GOPT_DIFFICULTY, 1)
+GAME_OPTION(demo_sound, GOPT_DEMO_SOUND, 0)
+GAME_OPTION(command_display, GOPT_COMMAND_DISPLAY, 0)
+GAME_OPTION(attack_cpu, GOPT_ATTACK_CPU, 1)
+GAME_OPTION(attack_vs, GOPT_ATTACK_VS, 1)
+GAME_OPTION(time_cpu, GOPT_TIME_CPU, 1)
+GAME_OPTION(time_vs, GOPT_TIME_VS, 1)
+GAME_OPTION(replay, GOPT_REPLAY, 0)
+GAME_OPTION(continue_, GOPT_CONTINUE, 0)
+GAME_OPTION(blood, GOPT_BLOOD, 0)
 static int get_region(void) { return g_settings.region; }
 static void set_region(int v) {
     g_settings.region = v;
@@ -107,12 +136,17 @@ static const char* name_winsize(int i) {
     return names[i];
 }
 static const char* const k_aspect[] = {"Arcade 4:3", "Stretch to fill", "4:3, whole-number scale", "Widescreen"};
+static const char* const k_hud[] = {"Arcade position", "Screen edges"};
 static const char* const k_graphics[] = {"Enhanced", "Original arcade"};
 static const char* const k_quality[] = {"Auto (keeps 60 fps)", "Performance  2\xC3\x97", "Balanced  3\xC3\x97",
                                         "High  4\xC3\x97", "Ultra  6\xC3\x97", "Extreme  8\xC3\x97"};
 static const char* const k_filter[] = {"Sharp", "Smooth", "Scanlines"};
 static const char* const k_pacing[] = {"Arcade speed  59.43 Hz", "Display vsync"};
 static const char* const k_player[] = {"Player 1", "Player 2"};
+static const char* const k_offon[] = {"Off", "On"};
+static const char* const k_difficulty[] = {"Easy", "Normal", "Hard", "Hardest"};
+static const char* const k_attack[] = {"Light", "Normal", "Heavy"};
+static const char* const k_time[] = {"Slow", "Normal", "Quick"};
 static const char* const k_region[] = {"Japan  (Japanese)", "USA  (English)", "World  (English)"};
 
 static void act_resume(void);
@@ -149,6 +183,7 @@ static const Item k_display[] = {
     DCHOICE("Window size", "Size of the window when not in full screen.", get_window_size, set_window_size, count_winsizes, name_winsize, windowed),
     DCHOICE("Monitor", "Which display to use for full screen (and to place the window on).", get_monitor, set_monitor, count_monitors, name_monitor, nullptr),
     CHOICE("Picture shape", "The arcade monitor was 4:3. Widescreen shows more of the arena at the sides in fights (needs Enhanced graphics).", get_aspect, set_aspect, k_aspect, nullptr),
+    CHOICE("Widescreen display", "Where the health bars and the boxes at the top sit in widescreen fights: where the arcade put them, or out at the edges of the screen.", get_hud_edges, set_hud_edges, k_hud, widescreen_on),
     CHOICE("Graphics", "Enhanced redraws the 3D on your graphics card at high resolution. F9 switches while playing.", get_graphics, set_graphics, k_graphics, nullptr),
     CHOICE("Quality", "Auto picks the sharpest setting your PC can hold at full speed and steps down if it ever can't.", get_quality, set_quality, k_quality, enhanced_on),
     CHOICE("Screen filter", "Sharp pixels, smooth scaling, or arcade-monitor scanlines.", get_filter, set_filter, k_filter, nullptr),
@@ -174,9 +209,24 @@ static const Item k_controls[] = {
 };
 static const Item k_game[] = {
     TOGGLE("Unlock Silber", "The hidden twelfth fighter, Original Karate, at the bottom of the style list. Off: locked until earned, as in the arcade.", get_unlock_silber, set_unlock_silber),
+    CHOICE("Free play", "On: Start alone begins a game, no coin needed. Off: insert a coin first, as in the arcade.", get_free_play, set_free_play, k_offon, rules_ready),
     CHOICE("Language / region", "The board's BIOS sets the game's language. The game reads it at power on, so it applies after a restart.", get_region, set_region, k_region, nullptr),
     ACTION("Restart now to apply", "Starts the arcade board again with the new region.", act_restart, region_pending),
     INFO("Arcade save memory", "Operator settings and high scores are kept between runs.", info_save),
+};
+// The arcade operator's game options (Test menu > GAME OPTIONS). Saved in the arcade's save memory.
+#define RULES_WHEN " Applies from the next fight."
+static const Item k_rules[] = {
+    CHOICE("Difficulty", "How well the computer fights." RULES_WHEN, get_difficulty, set_difficulty, k_difficulty, rules_ready),
+    CHOICE("Attack power, 1 player", "How much damage attacks do against the computer." RULES_WHEN, get_attack_cpu, set_attack_cpu, k_attack, rules_ready),
+    CHOICE("Attack power, versus", "How much damage attacks do in a two-player fight." RULES_WHEN, get_attack_vs, set_attack_vs, k_attack, rules_ready),
+    CHOICE("Timer speed, 1 player", "How fast the fight clock runs against the computer." RULES_WHEN, get_time_cpu, set_time_cpu, k_time, rules_ready),
+    CHOICE("Timer speed, versus", "How fast the fight clock runs in a two-player fight." RULES_WHEN, get_time_vs, set_time_vs, k_time, rules_ready),
+    CHOICE("Continue", "Whether you can carry on after losing.", get_continue_, set_continue_, k_offon, rules_ready),
+    CHOICE("Replay", "The slow-motion replay of the finish after a fight.", get_replay, set_replay, k_offon, rules_ready),
+    CHOICE("Blood", "Blood effects.", get_blood, set_blood, k_offon, rules_ready),
+    CHOICE("Move commands on screen", "The arcade's COMMAND DISP. option: the on-screen guide to the controls.", get_command_display, set_command_display, k_offon, rules_ready),
+    CHOICE("Sound in the title demo", "Whether the demo fights play sound while nobody is playing.", get_demo_sound, set_demo_sound, k_offon, rules_ready),
 };
 static const Item k_system[] = {
     ACTION("Resume", "Back to the game.", act_resume, nullptr),
@@ -191,9 +241,10 @@ static const Section k_sections[] = {
     {"AUDIO", k_audio, NCH(k_audio)},
     {"CONTROLS", k_controls, NCH(k_controls)},
     {"GAME", k_game, NCH(k_game)},
+    {"RULES", k_rules, NCH(k_rules)},
     {"SYSTEM", k_system, NCH(k_system)},
 };
-#define NSECT 5
+#define NSECT 6
 #define MAXROWS 16
 
 static int choice_count(const Item* it) { return it->dyn_count ? it->dyn_count() : it->nchoices; }

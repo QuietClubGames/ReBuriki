@@ -334,7 +334,6 @@ bool ensure_targets(int w, int h, int samples) {
 
 bool hd_draw(ID3D11RenderTargetView* target, int vx, int vy, int vw, int vh) {
     if (!init_once()) return false;
-    video_set_wide_layers(fe_setting_aspect() == 3);   // (takes effect from the next frame drawn)
     HdLayers L;
     if (!video_hd_layers(&L)) return false;   // e.g. screen disabled: use the normal picture
 
@@ -348,10 +347,21 @@ bool hd_draw(ID3D11RenderTargetView* target, int vx, int vy, int vw, int vh) {
     if (fe_setting_aspect() == 3 && vh > 0) {
         const float k = ((float)vw / (float)vh) / (4.0f / 3.0f);
         if (k > 1.001f && L.margin > 0 && wide_scene(L, tris, ntri)) wide = std::min(k, 1.0f + L.margin / 256.0f);
+        // (while the pause menu is open this frame is drawn again and again: keep what it was made with)
         else {                                   // 4:3 in the middle of the wide area
             const int w43 = vh * 4 / 3;
             if (w43 < vw) { vx += (vw - w43) / 2; vw = w43; }
         }
+    }
+
+    // For the next frame the game draws: wide 2D layers when the picture shape is Widescreen, and,
+    // with "HUD at the screen edges", how far out to draw the fight display's side parts: the
+    // width of the extra picture on each side, in arcade pixels. Only when this frame went wide,
+    // so the display isn't pushed out of a 4:3 picture.
+    {
+        const bool widescreen = fe_setting_aspect() == 3;
+        const int shift = (widescreen && wide > 1.001f && fe_setting_hud_edges()) ? (int)((wide - 1.0f) * 256.0f + 0.5f) : 0;
+        video_set_wide_layers(widescreen, shift);
     }
 
     // 3D target: the 512x512 buffer covers the picture width and 512/448 of its height.

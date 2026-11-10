@@ -327,7 +327,8 @@ the install folder has the details.
 
 PLAYING
 -------
-To start a game: insert a coin, then press Start.
+To start a game: insert a coin, then press Start. With "Free play" on (the menu's Game page), Start
+alone is enough.
 Buriki One plays differently from most fighting games: the buttons move your fighter and the stick
 attacks. The game's own "How to play" screens show the moves for each fighter.
 
@@ -350,7 +351,7 @@ KEYBOARD
   Tab / Esc          menu (quit from its System page)
   Alt+Enter, F11     window / full screen
   F9                 enhanced graphics on / off
-  F2                 the arcade's Test button (operator menu)
+  F2                 the arcade's Test button (operator menu: its other settings, tests, records)
   9                  the arcade's Service button
 
 Every key and controller button can be changed in the menu's Controls page.
@@ -365,13 +366,16 @@ a different one each time.
   Keyboard: arrows to move, Enter to choose, Esc to go back, Q / E to switch pages, Tab to close.
 Pages:
   Display   window / borderless / exclusive full screen, window size, monitor,
-            picture shape (arcade 4:3, stretch, whole-number, widescreen),
-            enhanced or original graphics, quality, screen filter (sharp / smooth / scanlines),
-            frame pacing, graphics card, frame-rate counter
+            picture shape (arcade 4:3, stretch, whole-number, widescreen), where the health bars sit in
+            widescreen, enhanced or original graphics, quality, screen filter (sharp / smooth /
+            scanlines), frame pacing, graphics card, frame-rate counter
   Audio     volume, mute
   Controls  change any key or button ("press the one you want"), stick dead zone, restore defaults
-  Game      unlock Silber (on by default); language / region: Japan (Japanese), USA or World
-            (English), which applies after a restart
+  Game      unlock Silber (on by default); free play; language / region: Japan (Japanese), USA or
+            World (English), which applies after a restart
+  Rules     the arcade operator's settings: difficulty, attack power and timer speed (1 player and
+            versus), continue, replay, blood, move commands on screen, sound in the title demo.
+            They apply from the next fight and are kept in the arcade's save memory.
   System    resume, the arcade's operator menu, restart, quit
 
 Silber, the final boss, is a hidden twelfth fighter ("Original Karate", at the bottom of the style
@@ -380,6 +384,8 @@ way; what you have earned is kept either way.
 
 Widescreen (Display > Picture shape): fights fill a 16:9 screen, up to 21:9, with more of the arena at
 the sides. Menus and other flat screens stay 4:3. It needs Graphics set to Enhanced.
+"Widescreen display" chooses where the health bars and the boxes at the top sit: where the arcade
+put them, or out at the edges of the screen.
 
 Settings are saved in settings.ini, keys and buttons in controls.ini, and the arcade board's own saved
 settings and records in nvram.bin (all in the install folder).

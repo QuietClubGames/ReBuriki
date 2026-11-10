@@ -557,3 +557,73 @@ Read from the game's code and confirmed by running it. Addresses are for rev. B.
     fight; the save file's flag word stayed 0000 over two runs and its play counters carried on
     (1 then 2), so the game doesn't treat the save as damaged. Headless frames still match
     `frames_soak_ref`. Not checked by hand: switching the option in the menu mid-session.
+
+## Arcade options in the menu, clock, HUD at the edges (2026-11-10): done
+
+### Arcade options (menu: Game > Free play, and the new Rules page)
+
+- **Where they live** (found by changing each option in the Test menu by script and comparing
+  the save memory; one byte each, no checksum, saved when the options page is left through EXIT):
+  - coin settings: nvram 0x2030 + n. Free play = 0x2032 (0 / 1). Coin counter / credit display =
+    0x2031, 0x2033; coins per credit = 0x2034 and 0x2037.
+  - game options: nvram 0x2050 + n in the Test menu's order: DIFFICULTY (1-4), DEMO SOUND,
+    COMMAND DISP., ATTACK POWER CPU (1-3), ATTACK POWER VS., PLAY TIME CPU (1-3), PLAY TIME VS.,
+    REPLAY, CONTINUE, LANGUAGE (1 Japanese, 2 English), SECOND DISP (0-2), SECOND BTN DISP (0-2),
+    1 CREDIT VS, BLOOD DISP. A second copy at 0x2060 looks like the factory defaults.
+- **The game copies them into RAM at power on** and then reads only the copies: coin block at
+  0x801446E0 + n, game options at 0x801446F0 + n. Changing only the nvram does nothing until
+  the next boot; changing the RAM copy works at once (free play: the attract text switches to
+  PRESS 1P OR 2P START / FREE PLAY and Start works without a coin).
+- `hw_game_option_get / set` (`hw.cpp`) write both, so a change is kept and applies now. The menu
+  rows read the game's own values (not settings.ini), so the Test menu and our menu always agree.
+  Rows are greyed out until the game has set up its settings (`hw_game_options_ready`).
+- **LANGUAGE is left out on purpose:** changing its RAM copy mid-run stopped the game (bad read
+  at 08ED83B4 in `func_80060B00`). Region in our menu already covers language, with a restart.
+- Left to the Test menu (F2): SECOND DISP, SECOND BTN DISP, 1 CREDIT VS, coin counts. I don't
+  know what the first three do well enough to describe them to a player.
+- The one-line descriptions on the Rules page come from the option names, and "applies from the
+  next fight" is an assumption. Neither is confirmed by play.
+- Checked: both pages by screenshot; free play by RAM poke. Not checked: changing an option from
+  our menu by hand, and that each rule really changes the fight.
+
+### Clock
+
+- The RTC62423 (MSM6242-style) at 0x1F702100 now returns the PC's local time and date, read once
+  per frame (`rtc_read` in `hw.cpp`). Register F reports 24-hour mode. Writes are ignored.
+- Headless runs keep the old all-zero clock (`BURIKI_RTC=1` forces the real one, `=0` the zero
+  one), so reference runs don't depend on the time of day.
+- Checked: the Test menu's CALENDER SETTING screen showed 2026/11/10(TUE) 14:48:59, matching
+  the PC.
+- For netplay later: both sides would need the same clock value.
+
+### Widescreen: HUD at the screen edges (Display > Widescreen display)
+
+- The fight display is all sprites in the front priority groups (0-3). The arena's decorations
+  are sprites in groups 6-7, behind the 3D.
+- With the option on, `screen_update` draws the sprite buffer a second time for the wide front
+  layer, with each front sprite moved by `hud_shift_for` (`video.cpp`): top band (ends above
+  line 80) moves out unless its centre is in the clock's zone (x 192-320); bottom band (from
+  line 360) moves by half; in lines 200-350 only what lies wholly left of x 208 or right of
+  x 304 (the button guides). Anything across the middle stays (K.O., banners, the coin prompt).
+- The shift is the width of the extra picture each side, in arcade pixels, from `hd3d.cpp`
+  (`video_set_wide_layers(on, shift)`), and is 0 unless the previous frame went wide. So there is
+  a one-frame lag when a scene turns wide or back.
+- The normal 512x448 picture is untouched (20 frames compared with the option on and off).
+- Checked in a scripted 16:9 fight. Not checked: two-player fights (player 2's guide), 21:9.
+
+### Winner screen
+
+- The dark bar behind the winner's name is inset about 32 pixels from each side in 4:3 as well,
+  so its width in widescreen is the arcade's own design. Nothing to change. (An earlier note
+  called it a widescreen shortcoming; that was wrong.)
+
+### Sound: the delay ("echo") effect is used by the game but still not emulated
+
+- `BURIKI_LOGFX=1` prints what the game asks of it. Over 6000 frames: voices are sent to the
+  delay (register 7, destination 0xF) with send levels 0xFC-0xFE and the "e" nibble from 4 to
+  0xC, and register A sets taps on voices 1-3 and 8-10 (feedback, dd = 3), 11 (address 0x2001,
+  dd = 2), 12-16 (left) and 22-26 (right) with rising volumes, and 31.
+- MAME's source documents the register fields but not how the chip combines them ("How does the
+  delay effect work?", "delay effect parameters, unknown encoding"). Writing one from this alone
+  would be invention. It needs a recording of a real board to match against, or documentation of
+  the Akai S3000's effect section, which the chip comes from.

@@ -28,7 +28,7 @@ void  uip_art(float x, float y, float w, float h, float radius, float alpha);
 // ---- input ----
 enum { UI_UP, UI_DOWN, UI_LEFT, UI_RIGHT, UI_OK, UI_BACK, UI_PREV_TAB, UI_NEXT_TAB, UI_CLOSE };
 enum { UI_DEV_KEYBOARD, UI_DEV_PAD };
-enum { UI_PAGE_DISPLAY, UI_PAGE_AUDIO, UI_PAGE_CONTROLS, UI_PAGE_GAME, UI_PAGE_SYSTEM, UI_PAGE_COUNT };
+enum { UI_PAGE_DISPLAY, UI_PAGE_AUDIO, UI_PAGE_CONTROLS, UI_PAGE_GAME, UI_PAGE_RULES, UI_PAGE_SYSTEM, UI_PAGE_COUNT };
 
 // ---- services the menu needs from the platform ----
 // Remappable actions: player * 6 + {0-3 buttons 1-4, 4 start, 5 coin}.
