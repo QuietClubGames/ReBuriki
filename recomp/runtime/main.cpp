@@ -46,6 +46,7 @@
 #include <io.h>
 #endif
 #include "hw.h"
+#include "savestate.h"
 #include "video.h"
 #include "input.h"
 #include "funcs.h"
@@ -117,6 +118,49 @@ static std::string default_rom_dir() {
 }
 #else
 static std::string default_rom_dir() { return "roms"; }
+#endif
+
+#ifdef _WIN32
+// Diagnostics (env BURIKI_PROFILE=file): a sampling profiler. A second thread stops the game thread about
+// 5,000 times a second, notes where it is, and lets it go; at exit the addresses are written to the file with
+// the program's load address in front. tools/profile_report.py turns that into time per function.
+static std::vector<uint64_t> g_prof_samples;
+static HANDLE g_prof_thread;
+static void write_profile() {
+    const char* path = getenv("BURIKI_PROFILE");
+    if (!path || g_prof_samples.empty()) return;
+    if (FILE* f = fopen(path, "wb")) {
+        const uint64_t base = (uint64_t)GetModuleHandleA(nullptr), n = g_prof_samples.size();
+        fwrite(&base, 8, 1, f);
+        fwrite(&n, 8, 1, f);
+        fwrite(g_prof_samples.data(), 8, g_prof_samples.size(), f);
+        fclose(f);
+    }
+}
+static void start_profiler() {
+    if (!getenv("BURIKI_PROFILE")) return;
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &g_prof_thread, 0, FALSE, DUPLICATE_SAME_ACCESS);
+    g_prof_samples.reserve(8u << 20);
+    atexit(write_profile);
+    static const bool replay_only = getenv("BURIKI_PROFILE_REPLAY") != nullptr;
+    std::thread([] {
+        LARGE_INTEGER freq, last, now;
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&last);
+        const LONGLONG step = freq.QuadPart / 5000;
+        for (;;) {
+            do { YieldProcessor(); QueryPerformanceCounter(&now); } while (now.QuadPart - last.QuadPart < step);
+            last = now;
+            if (g_prof_samples.size() >= g_prof_samples.capacity()) return;
+            if (replay_only && !savestate_skip_video()) continue;   // BURIKI_PROFILE_REPLAY: the replay half only
+            CONTEXT c;
+            c.ContextFlags = CONTEXT_CONTROL;
+            if (SuspendThread(g_prof_thread) == (DWORD)-1) return;
+            if (GetThreadContext(g_prof_thread, &c)) g_prof_samples.push_back(c.Rip);
+            ResumeThread(g_prof_thread);
+        }
+    }).detach();
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -221,6 +265,9 @@ int main(int argc, char** argv) {
         }
     }).detach();
 
+#ifdef _WIN32
+    start_profiler();
+#endif
     func_80008000(g_ram, &g_ctx);
     hw_fatal("game entry point returned");
 }

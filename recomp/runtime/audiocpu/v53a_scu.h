@@ -48,6 +48,12 @@ public:
 	int txrdy_r();
 	int rxrdy_r();
 
+	// For the owner's lazy baud-rate clock (V53A::brc_sync). clock_tick_is_idle(): one tick of that clock
+	// (txc low, txc high, rxc low, rxc high) would change nothing but the transmit divider's count.
+	// skip_idle_ticks(n): advance that count as n such ticks would have.
+	bool clock_tick_is_idle() const;
+	void skip_idle_ticks(uint64_t n);
+
 private:
 	enum
 	{

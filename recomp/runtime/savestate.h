@@ -15,9 +15,14 @@ struct StateIO {
     std::vector<uint8_t>& buf;
     bool saving;
     size_t pos = 0;
+    // Saving writes at `pos` too (the buffer is reused from one save to the next and grows only once);
+    // the caller trims it to `pos` afterwards.
     void raw(void* p, size_t n) {
-        if (saving) { const uint8_t* b = (const uint8_t*)p; buf.insert(buf.end(), b, b + n); }
-        else { memcpy(p, buf.data() + pos, n); pos += n; }
+        if (saving) {
+            if (buf.size() < pos + n) buf.resize(pos + n);
+            memcpy(buf.data() + pos, p, n);
+        } else memcpy(p, buf.data() + pos, n);
+        pos += n;
     }
     template <class T> void pod(T& v) { raw(&v, sizeof v); }
 };
@@ -34,3 +39,7 @@ void input_state(StateIO& io);                  // control latches and coin puls
 void savestate_frame(void* recomp_ctx, const void* site, bool in_irq);
 // The replay half of the test doesn't draw (as a rollback wouldn't): hw_events asks before video_frame().
 bool savestate_skip_video(void);
+// The test's "nosound" option: the sound board is left out of the saved state (savestate_without_sound) and
+// is not run during the replays (savestate_skip_sound).
+bool savestate_skip_sound(void);
+bool savestate_without_sound(void);

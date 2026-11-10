@@ -8,6 +8,7 @@
 #include "hw.h"
 #include "video.h"
 #include "hd3d.h"
+#include "savestate.h"
 
 #include <algorithm>
 #include <cmath>
@@ -599,6 +600,10 @@ void recoverPolygonBlock(const u16* packet, int& numPolys) {
 
 bool command3d(const u16* packet) {
     int numPolys = 0;
+    // A replay (a rollback re-running frames nobody will see) doesn't draw: the polygon packets are
+    // skipped. The packets that set state (camera, lights, flags, projection) are still followed, so the
+    // next frame that is drawn starts from the right state. Nothing here is ever read by the game.
+    if (packet[0] >= 0x0100 && packet[0] <= 0x0102 && savestate_skip_video()) return true;
     switch (packet[0]) {
     case 0x0000: return false;
     case 0x0001: setCameraTransformation(packet); break;

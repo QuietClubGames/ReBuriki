@@ -109,7 +109,7 @@ uint64_t V53A::next_event_time() const
 		t = m_icu_eval_time;
 	if (!m_dmau.waiting() && m_dma_next < t)
 		t = m_dma_next;
-	if (m_brc_hz)
+	if (m_brc_hz && !brc_lazy())
 	{
 		const uint64_t b = m_brc_start + ((m_brc_k + 1) * uint64_t(m_clock) + m_brc_hz - 1) / m_brc_hz;
 		if (b < t)
@@ -145,7 +145,7 @@ void V53A::process_events(uint64_t until)
 			best = m_dma_next;
 			kind = 2;
 		}
-		if (m_brc_hz)
+		if (m_brc_hz && !brc_lazy())
 		{
 			const uint64_t b = m_brc_start + ((m_brc_k + 1) * uint64_t(m_clock) + m_brc_hz - 1) / m_brc_hz;
 			if (b < best)
@@ -159,6 +159,8 @@ void V53A::process_events(uint64_t until)
 			break;
 
 		m_cur = best;
+		stat_events++;
+		stat_kind[kind]++;
 		switch (kind)
 		{
 		case 0:
@@ -206,6 +208,8 @@ int V53A::run(int cycles)
 			m_slice_len = int(len);
 			m_icount = int(len);
 			m_in_cpu = true;
+			soft_cut_update();
+			stat_slices++;
 			execute_run();
 			m_in_cpu = false;
 			m_time = m_slice_start + uint64_t(int64_t(m_slice_len) - int64_t(m_icount));
@@ -354,7 +358,9 @@ void V53A::reset()
 	m_tcu.reset();
 	m_dmau.reset();
 	m_icu.reset();
+	brc_sync();
 	m_scu.reset();
+	brc_resched();
 	m_icu_eval_pending = false;
 	if (m_dma_next < now())
 		m_dma_next = now();
@@ -379,6 +385,7 @@ void V53A::tcu_clock_update()
 
 void V53A::brc_update()
 {
+	brc_sync(); // the old clock's ticks, before it is restarted
 	if (m_brc_enable)
 	{
 		const int divider = (m_BRC < 2) ? 2 : m_BRC;
@@ -388,9 +395,82 @@ void V53A::brc_update()
 		m_brc_hz = period > 0 ? uint64_t(period) : 0;
 		m_brc_start = now();
 		m_brc_k = 0;
-		if (m_brc_hz)
-			schedule_event(m_brc_start + (uint64_t(m_clock) + m_brc_hz - 1) / m_brc_hz);
+		m_soft_valid = false;
+		brc_resched();
 	}
+}
+
+void V53A::brc_sync()
+{
+	if (!m_brc_hz)
+		return;
+	// Tick k (k = 1, 2, ...) is due at m_brc_start + ceil(k * clock / hz). Ticked one at a time, every tick due
+	// at or before the start of the current instruction has been applied when that instruction runs, and none
+	// later. So: bring the count up to exactly those.
+	const uint64_t t = m_in_cpu ? m_slice_start + uint64_t(m_instr_elapsed) : m_cur;
+	if (t <= m_brc_start)
+		return;
+	const uint64_t due = (t - m_brc_start) * m_brc_hz / uint64_t(m_clock);
+	if (due > m_brc_k)
+	{
+		m_scu.skip_idle_ticks(due - m_brc_k);
+		m_brc_k = due;
+	}
+}
+
+void V53A::brc_resched()
+{
+	if (m_brc_hz && !brc_lazy())
+	{
+		m_soft_icount = 0;
+		schedule_event(m_brc_start + ((m_brc_k + 1) * uint64_t(m_clock) + m_brc_hz - 1) / m_brc_hz);
+	}
+	else if (m_in_cpu)
+		soft_cut_update();
+}
+
+// While the baud-rate clock's ticks are not events (the serial unit is idle), the CPU's run is no longer cut
+// at each tick. One thing in the core depends on those cuts: a REP string instruction stops at the end of a
+// run and carries on in the next, and each stop costs a few clocks (the CLK(2) and the prefetch bookkeeping
+// are charged again). MAME's timing has those stops, about 8,400 a frame here, so they are kept: REP loops
+// stop when the clock count reaches m_soft_icount, the point in the current run where the next tick falls.
+// Everything else in the core behaves the same with or without a cut between two instructions.
+void V53A::soft_cut_update()
+{
+	if (!(m_brc_hz && brc_lazy()))
+	{
+		m_soft_icount = 0;
+		return;
+	}
+	const uint64_t t = m_slice_start + uint64_t(int64_t(m_slice_len) - int64_t(m_icount));        // now
+	const uint64_t clock = uint64_t(m_clock);
+	// The next tick after now: tick j is at m_brc_start + ceil(j * clock / hz), kept as the whole part
+	// m_soft_floor and the remainder m_soft_rem of j * clock / hz so that stepping to the following tick
+	// needs no division (this runs once per tick).
+	if (!m_soft_valid || t < m_soft_time)
+	{
+		const uint64_t k = t > m_brc_start ? (t - m_brc_start) * m_brc_hz / clock : 0;             // ticks due by now
+		m_soft_floor = (k + 1) * clock / m_brc_hz;
+		m_soft_rem = (k + 1) * clock % m_brc_hz;
+		m_soft_q = clock / m_brc_hz;
+		m_soft_r = clock % m_brc_hz;
+		m_soft_valid = true;
+	}
+	const uint64_t q = m_soft_q, r = m_soft_r;
+	while (m_brc_start + m_soft_floor + (m_soft_rem ? 1 : 0) <= t)
+	{
+		m_soft_floor += q;
+		m_soft_rem += r;
+		if (m_soft_rem >= m_brc_hz)
+		{
+			m_soft_rem -= m_brc_hz;
+			m_soft_floor++;
+		}
+	}
+	m_soft_time = t;
+	const uint64_t b = m_brc_start + m_soft_floor + (m_soft_rem ? 1 : 0);
+	const uint64_t end = m_slice_start + uint64_t(m_slice_len);
+	m_soft_icount = b < end ? int(end - b) : 0;
 }
 
 void V53A::brc_tick()
@@ -412,6 +492,7 @@ void V53A::SCTL_w(uint8_t data)
 	// bit 1: uPD71037 DMA mode enable (otherwise in uPD71071 mode)
 	// bit 0: Onboard pripheral I/O maps to 8-bit boundaries? (otherwise 16-bit)
 
+	brc_sync();
 	m_SCTL = data & 0x1f;
 	m_brc_enable = VBIT(data, 4);
 
@@ -425,6 +506,7 @@ void V53A::SCTL_w(uint8_t data)
 	else
 	{
 		m_brc_hz = 0; // m_brc_timer->adjust(attotime::never)
+		m_soft_valid = false;
 	}
 }
 
@@ -432,8 +514,10 @@ void V53A::tout1_w(int state)
 {
 	if (!VBIT(m_SCTL, 4))
 	{
+		brc_sync();
 		m_scu.write_rxc(state);
 		m_scu.write_txc(state);
+		brc_resched();
 	}
 
 	if (cb.tout)
@@ -646,7 +730,13 @@ uint8_t V53A::internal_io_read_byte(uint32_t a)
 		case 0: return m_dmau.read(offset);
 		case 1: return m_icu.read(offset);
 		case 2: return m_tcu.read(offset);
-		case 3: return m_scu.read(offset);
+		case 3:
+		{
+			brc_sync();
+			const uint8_t v = m_scu.read(offset);
+			brc_resched();
+			return v;
+		}
 		case -1: return nec_io_read_byte(OPHA() | (a & 0xff)); // temp_io_byte_r
 		default: return 0;
 	}
@@ -660,7 +750,7 @@ void V53A::internal_io_write_byte(uint32_t a, uint8_t v)
 		case 0: m_dmau.write(offset, v); break;
 		case 1: m_icu.write(offset, v); break;
 		case 2: m_tcu.write(offset, v); break;
-		case 3: m_scu.write(offset, v); break;
+		case 3: brc_sync(); m_scu.write(offset, v); brc_resched(); break;
 		case -1: nec_io_write_byte(OPHA() | (a & 0xff), v); break; // temp_io_byte_w
 		default: break;
 	}

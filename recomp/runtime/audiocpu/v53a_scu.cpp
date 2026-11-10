@@ -646,6 +646,49 @@ void Scu::write_txc(int state)
 	}
 }
 
+//-------------------------------------------------
+//  The baud-rate clock ticks about 8,400 times a frame on the HNG64 sound board, where the serial port is
+//  never used. A tick with the port idle does exactly this in transmit_clock(): count up, and every
+//  m_br_factor ticks take the "nothing to send" branch, which sets a status bit that is already set and
+//  repeats the same pin and interrupt levels. The receiver, if on, looks at an idle line and stays
+//  unsynchronised. So idle ticks can be applied all at once, later, without changing anything.
+//-------------------------------------------------
+
+bool Scu::clock_tick_is_idle() const
+{
+	if (!m_txc || !m_rxc)
+		return false; // a tick must start with both clock inputs high (it leaves them high)
+	if (m_tra_left != 0)
+		return false; // sending
+	if ((m_status & I8251_STATUS_TX_READY) == 0 && (is_tx_enabled() || m_delayed_tx_en))
+		return false; // a byte is waiting to be sent
+	if (!(m_status & I8251_STATUS_TX_EMPTY))
+		return false; // the next divider wrap would set it
+	if (m_sync_byte_count != 0)
+		return false; // synchronous modes send sync characters while idle
+	if (SBIT(m_command, 2) && (m_rcv_sync || m_rcv_full || m_rxd != 1))
+		return false; // receiving, or the line isn't idle
+	return true;
+}
+
+void Scu::skip_idle_ticks(uint64_t n)
+{
+	// transmit_clock(): m_txc_count++, and back to 0 when it reaches m_br_factor (with 32-bit wrap-around,
+	// as the int does when m_br_factor is 0 or already passed)
+	uint32_t c = uint32_t(m_txc_count);
+	const uint32_t f = uint32_t(m_br_factor);
+	const uint64_t to_match = uint64_t(uint32_t(f - c - 1)) + 1; // ticks until the count equals the factor
+	if (n >= to_match)
+	{
+		n -= to_match;
+		const uint64_t period = f ? uint64_t(f) : (uint64_t(1) << 32);
+		c = uint32_t(n % period);
+	}
+	else
+		c += uint32_t(n);
+	m_txc_count = int(c);
+}
+
 int Scu::txrdy_r()
 {
 	return is_tx_enabled() && (m_status & I8251_STATUS_TX_READY) != 0;

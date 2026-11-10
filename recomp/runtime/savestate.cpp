@@ -1,6 +1,6 @@
 // Save-state feasibility test for rollback netplay (see savestate.h).
 //
-//   BURIKI_SAVETEST=N,K[,R][,novideo][,nohash][,loop]
+//   BURIKI_SAVETEST=N,K[,R][,novideo][,nohash][,loop][,nosound]
 //
 // At the end of frame N the machine is saved. The game plays on for K frames (pass 1) while a fingerprint of
 // main RAM is noted every frame. Then the state is put back and the same K frames are played again (the
@@ -14,6 +14,9 @@
 //            that matters.
 //   nohash   no per-frame fingerprints (they cost a few milliseconds each): only the whole machine at the
 //            end of each replay is compared. For clean timings.
+//   nosound  the sound board is not part of the state and does not run in the replays: an experiment for
+//            a netplay design where it stays outside the rollback (NOTES.md, "Sound board and rollback").
+//            "Identical" then means the game, the I/O board and the controls.
 // It prints what it found and stops the program.
 #include "savestate.h"
 #include "hw.h"
@@ -37,9 +40,10 @@ uint64_t fnv(const uint8_t* p, size_t n, uint64_t h = 1469598103934665603ull) {
 }
 uint64_t ram_hash() { return fnv(g_ram, HW_RAM_SIZE); }
 
+bool g_nosound = false;
 void machine(StateIO& io, void* ctx) {
     hw_state(io, ctx);
-    sound_state(io);
+    if (!g_nosound) sound_state(io);
     io_board_state(io);
     input_state(io);
 }
@@ -75,23 +79,23 @@ void parse() {
     g.novideo = s.find("novideo") != std::string::npos;
     g.nohash = s.find("nohash") != std::string::npos;
     g.loop = s.find("loop") != std::string::npos;
+    g_nosound = s.find("nosound") != std::string::npos;
     g.ram.resize(k + 1);
     g.state.reserve(32u << 20);
     g.scratch.reserve(32u << 20);
 }
 
 uint64_t full_hash(void* ctx) {
-    g.scratch.clear();
     StateIO io{g.scratch, true};
     machine(io, ctx);
-    return fnv(g.scratch.data(), g.scratch.size());
+    return fnv(g.scratch.data(), io.pos);
 }
 
 void save(void* ctx, uint32_t frame) {
-    g.state.clear();
     auto t = Clock::now();
     StateIO io{g.state, true};
     machine(io, ctx);
+    g.state.resize(io.pos);
     const double ms = ms_since(t);
     g.save_ms += ms; g.saves++;
     if (ms > g.save_worst) g.save_worst = ms;
@@ -118,10 +122,10 @@ void finish() {
             g.done, g.k, g.identical, g.different,
             g.different ? (" (first at frame " + std::to_string(g.first_bad) + ")").c_str() : "", g.skipped);
     if (g.saves && g.loads && g.frames_replayed)
-        fprintf(stderr, "[savetest] TIMES: save %.2f ms (worst %.2f), load %.2f ms (worst %.2f), replay %.2f ms per frame%s (worst cycle %.2f), "
+        fprintf(stderr, "[savetest] TIMES: save %.2f ms (worst %.2f), load %.2f ms (worst %.2f), replay %.2f ms per frame%s%s (worst cycle %.2f), "
                         "first pass %.2f ms per frame, state %.1f MB\n",
                 g.save_ms / g.saves, g.save_worst, g.load_ms / g.loads, g.load_worst, g.replay_ms / g.frames_replayed,
-                g.novideo ? ", not drawing" : "", g.replay_worst, g.pass1_ms / g.frames_replayed, g.state.size() / 1048576.0);
+                g.novideo ? ", not drawing" : "", g_nosound ? ", sound board left out" : "", g.replay_worst, g.pass1_ms / g.frames_replayed, g.state.size() / 1048576.0);
     fflush(stderr);
     exit(g.different ? 4 : 0);
 }
@@ -129,6 +133,8 @@ void finish() {
 } // namespace
 
 bool savestate_skip_video(void) { return g.on && g.novideo && g.phase == 2; }
+bool savestate_skip_sound(void) { return g.on && g_nosound && g.phase == 2; }
+bool savestate_without_sound(void) { return g_nosound; }
 
 void savestate_frame(void* ctx, const void* site, bool in_irq) {
     if (!g.parsed) parse();

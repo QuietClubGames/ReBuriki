@@ -736,7 +736,7 @@ state, so a copy of that state is a save state. No host stack is copied.
   fine for rollback, where states never leave the process. A state sent to another PC or kept on
   disk would need field-by-field saving.
 
-### The test (`savestate.cpp`, env `BURIKI_SAVETEST=N,K[,R][,novideo][,nohash][,loop]`)
+### The test (`savestate.cpp`, env `BURIKI_SAVETEST=N,K[,R][,novideo][,nohash][,loop][,nosound]`)
 
 Save at the end of frame N, play K frames noting a fingerprint of main RAM each frame, put the
 state back, play the same K frames again with the same scripted controls, and compare every frame
@@ -767,6 +767,7 @@ the frame itself 5.3 + a save 1.75. That fits for R = 1 (12.2 ms) and just about
 ### What that means for netplay
 
 - The hard unknown is settled: states are exact, cheap, and available on every frame of a fight.
+- (Settled in the next section: the board can be left out of replays.)
 - **The sound board has to get cheaper to replay, or be left out of replays.** It can't simply be
   left out: the game reads the sound CPU's replies (`func_800CC434` reads the latch at 0x68000004
   into gp+0x2C78), so its behaviour feeds back into the game's memory. Options, to be tried in
@@ -782,3 +783,99 @@ the frame itself 5.3 + a save 1.75. That fits for R = 1 (12.2 ms) and just about
 - Not looked at yet: the networking itself, how players connect, input delay, and what happens
   on the frames that don't end at the wait point (scene changes: a rollback would have to wait
   for the next frame that does).
+
+## Sound board and rollback: making replays cheap (2026-11-10)
+
+Follows the save-state test above, which found a replayed frame cost 3.89 ms, most of it the
+sound board. Two things were done: the board was made faster without changing a single bit of
+what it does, and then it was shown that the game does not need it in a replay at all.
+
+| Replay of one frame, not drawing (this PC, `3000,8,400,loop,novideo,nohash`) | |
+|---|---|
+| At the start | 3.89 ms (save 1.75, load 1.27) |
+| Sound board faster, still replayed | 2.86 ms (save 1.30, load 1.29) |
+| Sound board left out of replays (`nosound`) | **0.65 ms** (save 1.05, load 1.06, state 19.7 MB) |
+
+A rollback of 8 frames now costs about 1.1 + 8 x 0.65 = 6.3 ms on top of the frame being played,
+where it was 32 ms. That is the room rollback netcode wants.
+
+### Part 1: exact speed-ups (every one checked: same RAM fingerprint at frame 6050, same WAV byte for byte, same reference frames)
+
+- **Direct memory for the V53** (`set_fast_memory`, `mem_rb/rw/wb/ww`): its 2 MB of RAM no
+  longer goes through a callback per byte. `BURIKI_V53_CALLBACKS=1` puts the old path back.
+- **Polygons are not prepared in replays** (`command3d` returns early for packets 0x0100 to
+  0x0102 when `savestate_skip_video()`): they carry no state from frame to frame.
+- **Saves write into a buffer that is reused** (`StateIO::raw`): 1.75 to 1.3 ms.
+- **The idle serial clock.** The V53's built-in serial port is never used by the game, but its
+  baud-rate clock was ticking 8,428 times a frame, and every tick ended the CPU's run: 8,846 runs
+  a frame for 95,000 instructions. A tick with the port idle only counts a divider
+  (`Scu::clock_tick_is_idle`, `skip_idle_ticks`), so the ticks are now applied later, in one go,
+  whenever something looks at the port (`brc_sync`, `brc_resched`). Runs a frame: 484.
+- **What that broke, and why.** The audio changed slightly. Cause: a REP string instruction
+  stops at the end of a run and carries on in the next one, and each stop costs a few extra
+  clocks (the loop conditions were `m_icount>0`). MAME's timing has those 8,400 stops a frame,
+  so they are part of "the same as MAME". Kept: the REP loops now stop where a tick would have
+  ended the run (`m_soft_icount`, `soft_cut_update`, all 56 loop conditions), without the run
+  really ending. Audio identical again.
+
+The honest result of that last one: 8,400 fewer runs saved only 0.1 ms (1.91 to 1.82 ms a
+frame). The cost is the interpreter itself, about 19 ns an instruction.
+
+Tools added: `BURIKI_SNDPROF=1` (per-frame counts and times), `BURIKI_PROFILE=file` (a sampling
+profiler in `main.cpp`; `BURIKI_PROFILE_REPLAY=1` samples the replays only) and
+`tools/profile_report.py <exe> <file>`.
+
+### Where a replayed frame's time went (profile of replays only, board still in)
+
+| | |
+|---|---|
+| V53 sound CPU | 43% |
+| I/O board microcontroller | 16% |
+| L7A1045 sound chip | 15% |
+| saving (once per 8 frames) | 17% |
+| the game itself | **5%** |
+
+Neither CPU is idling. A count of where they execute over 3,050 frames: the V53's busiest loop
+(0x96F9 to 0x970E) is 13.5% of its instructions and the rest is spread over its sequencer;
+the microcontroller's busiest (0xC71A to 0xC73B) is a third of its 45,000 instructions a frame.
+So there is no idle loop to skip, and squeezing the interpreters would give tens of percent,
+not multiples.
+
+### Part 2: the game does not depend on the sound board in a fight
+
+`BURIKI_SOUND_FREEZE=N` stops the board dead at frame N (no CPU, no chip, replies frozen).
+
+- Frozen from frame 3000 and run to 6050 through the soak script's fights: **main RAM is
+  byte-identical to the normal run** at all twelve frames compared (3004, 3100, 3288, 3500,
+  3851, 3852, 4200, 4600, 5000, 5400, 5800, 6040) and the final fingerprint matches.
+- In those frames the game read the board's reply latch (0x68000004) 141 times, about once per
+  command it sent, and the reply was different every time in the normal run. It made no
+  difference to anything the game kept.
+- `BURIKI_SAVETEST=...,nosound`: the board is left out of the state and not run during
+  replays; what the game sends it in a replay is dropped (it was sent the first time those
+  frames played). `2500,8,1500,loop,nosound` with a fingerprint every frame: 1,498 of 1,500
+  cycles identical, 0 different, 2 skipped, the same score as with the board in.
+
+What the code says (`func_800CC434`, the game's sound-command manager): there *is* a handshake.
+gp+0x2C80 holds a command waiting to be acknowledged (0xFFFF = none); the routine compares bit 1
+of the reply word at 0xE8000006 with it, copies the reply at 0xE8000004 to gp+0x2C78, and
+gp+0x2C82 counts down while waiting for the reply 0x55AA. In all the fight frames tested that
+path is idle (the frozen run would have left different values in those variables otherwise).
+It is most likely the start-up and sound-bank loading conversation. **That is the caveat:**
+tested over 12,000 frames of fights and scene changes, not proven for every screen.
+
+### What this means for netplay (replaces options 1 and 2 above)
+
+- Design: the game, the I/O board and the controls are rolled back; **the sound board runs
+  forward only**, like the picture. Replays cost 0.65 ms a frame.
+- Still to build for that: when a replay sends the board different commands from the first
+  time (the other player's attack arrived late, so its sound starts now), the new ones must be
+  passed on and the already-sent ones not repeated. The test only drops everything, which is
+  right when the replay is the same as the first pass.
+- Safeguard for the caveat: both players' games compare a fingerprint of game memory every so
+  often (standard in rollback netcode). If the handshake path ever matters during play it shows
+  up as a mismatch in testing instead of a silent drift.
+- If it does matter somewhere, the exact fallback is known: keep a log of what the game sent
+  the board and when, and re-run the board from a snapshot only when a replay's log differs
+  from the first pass. Costs the old 2.3 ms a frame, but only on those frames.
+- Saves are now the larger part (1.05 ms each, 19.7 MB). Dirty-page tracking would cut that.

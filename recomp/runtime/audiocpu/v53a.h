@@ -146,9 +146,9 @@ public:
 	void set_tclk(uint32_t hz);
 
 	// SCU inputs
-	void scu_rxd_w(int state) { m_scu.write_rxd(state); }
-	void scu_cts_w(int state) { m_scu.write_cts(state); }
-	void scu_dsr_w(int state) { m_scu.write_dsr(state); }
+	void scu_rxd_w(int state) { brc_sync(); m_scu.write_rxd(state); brc_resched(); }
+	void scu_cts_w(int state) { brc_sync(); m_scu.write_cts(state); brc_resched(); }
+	void scu_dsr_w(int state) { brc_sync(); m_scu.write_dsr(state); brc_resched(); }
 
 	// ---- debugging
 	uint16_t cs() const { return m_sregs[1]; }
@@ -171,6 +171,12 @@ public:
 	// Before a save state copies this object as raw bytes (sound.cpp): the one member that owns heap memory
 	// is emptied, so the copy holds nothing that could go stale.
 	void state_prepare() { m_last_log.clear(); m_last_log.shrink_to_fit(); }
+	// Direct memory: sixteen 64 KB banks (bank[(address >> 16) & 15] is the bank's number) in a buffer of
+	// host-native 32-bit words (the byte at offset o is base[o ^ 3]), offsets masked with `mask`. This is
+	// the HNG64 sound board's layout; it must describe exactly what the mem_* callbacks do.
+	void set_fast_memory(uint8_t *base, const uint8_t *bank, uint32_t mask) { m_fast_base = base; m_fast_bank = bank; m_fast_mask = mask; }
+	// profiling counters (sound.cpp, BURIKI_SNDPROF)
+	uint64_t stat_instr = 0, stat_slices = 0, stat_events = 0, stat_halted = 0, stat_kind[4] = {};
 	uint8_t opsel() const { return m_OPSEL; }
 	uint8_t opha() const { return m_OPHA; }
 	uint8_t sctl() const { return m_SCTL; }
@@ -261,6 +267,19 @@ private:
 	void tcu_clock_update();
 	void brc_update();
 	void brc_tick();
+	// Lazy baud-rate clock: while a tick would change nothing (Scu::clock_tick_is_idle) the ticks are not
+	// scheduled as events, which used to end the CPU's run about 8,400 times a frame for nothing.
+	// brc_sync() accounts for the ticks that were due before the current instruction began, and is called
+	// before anything that can touch the serial unit; brc_resched() afterwards schedules the next tick if
+	// the unit is no longer idle. The results are the same as ticking every time.
+	bool brc_lazy() const { return m_brc_hz && !cb.scu_pin && !cb.scu_sint && m_scu.clock_tick_is_idle(); }
+	void brc_sync();
+	void brc_resched();
+	int m_instr_elapsed = 0;      // clocks from the start of the slice to the start of the current instruction
+	void soft_cut_update();
+	int m_soft_icount = 0;        // REP loops stop when m_icount gets down to this (0 = only at the end of the run)
+	bool m_soft_valid = false;    // soft_cut_update()'s place in the tick sequence
+	uint64_t m_soft_floor = 0, m_soft_rem = 0, m_soft_time = 0, m_soft_q = 0, m_soft_r = 0;
 	void SCTL_w(uint8_t data);
 	void TCKS_w(uint8_t data) { m_TCKS = data; tcu_clock_update(); }
 	void BRC_w(uint8_t data) { m_BRC = data; brc_update(); }
@@ -301,8 +320,25 @@ private:
 	void io_write_word(uint32_t a, uint16_t v);
 
 	// program space
-	uint8_t mem_rb(uint32_t a) { a &= 0xffffff; return cb.mem_read8 ? cb.mem_read8(a) : 0; }
-	void mem_wb(uint32_t a, uint8_t d) { a &= 0xffffff; if (cb.mem_write8) cb.mem_write8(a, d); }
+	// Memory. With fast_base set (set_fast_memory) the core reads and writes the owner's banked memory
+	// itself; otherwise it goes through the mem_* callbacks. Both give the same bytes: the direct path is
+	// only there because a callback per byte fetched was the largest single cost of the sound board.
+	uint32_t fast_offset(uint32_t a) const { return ((uint32_t(m_fast_bank[(a >> 16) & 15]) << 16) | (a & 0xffff)) & m_fast_mask; }
+	uint8_t mem_rb(uint32_t a)
+	{
+		a &= 0xffffff;
+		if (m_fast_base) return m_fast_base[fast_offset(a) ^ 3];
+		return cb.mem_read8 ? cb.mem_read8(a) : 0;
+	}
+	void mem_wb(uint32_t a, uint8_t d)
+	{
+		a &= 0xffffff;
+		if (m_fast_base) { m_fast_base[fast_offset(a) ^ 3] = d; return; }
+		if (cb.mem_write8) cb.mem_write8(a, d);
+	}
+	uint8_t *m_fast_base = nullptr;
+	const uint8_t *m_fast_bank = nullptr;
+	uint32_t m_fast_mask = 0;
 	uint16_t mem_rw(uint32_t a);
 	void mem_ww(uint32_t a, uint16_t d);
 

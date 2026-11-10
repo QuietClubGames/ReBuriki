@@ -265,6 +265,12 @@ uint8_t V53A::fetchop()
 uint16_t V53A::mem_rw(uint32_t a)
 {
 	a &= 0xffffff;
+	if (!(a & 1) && m_fast_base)
+	{
+		// (as the 16-bit callback: both bytes from the bank of the first)
+		const uint32_t o = fast_offset(a);
+		return uint16_t(m_fast_base[o ^ 3] | (m_fast_base[((o + 1) & m_fast_mask) ^ 3] << 8));
+	}
 	if (!(a & 1) && cb.mem_read16)
 		return cb.mem_read16(a);
 	return uint16_t(mem_rb(a) | (mem_rb(a + 1) << 8));
@@ -273,6 +279,13 @@ uint16_t V53A::mem_rw(uint32_t a)
 void V53A::mem_ww(uint32_t a, uint16_t d)
 {
 	a &= 0xffffff;
+	if (!(a & 1) && m_fast_base)
+	{
+		const uint32_t o = fast_offset(a);
+		m_fast_base[o ^ 3] = uint8_t(d);
+		m_fast_base[((o + 1) & m_fast_mask) ^ 3] = uint8_t(d >> 8);
+		return;
+	}
 	if (!(a & 1) && cb.mem_write16)
 	{
 		cb.mem_write16(a, d);
@@ -504,12 +517,17 @@ void V53A::execute_run()
 {
 	if (m_halted)
 	{
+		stat_halted++;
 		m_icount = 0;
 		return;
 	}
 
 	while(m_icount>0)
 	{
+		stat_instr++;
+		if (m_icount <= m_soft_icount)              // passed a (lazy) serial-clock tick: find the next
+			soft_cut_update();
+		m_instr_elapsed = m_slice_len - m_icount;   // for brc_sync(): when this instruction began
 		m_prev_ip = m_ip;
 
 		// Dispatch IRQ

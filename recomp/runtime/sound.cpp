@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <string>
 #include "savestate.h"
+#include <chrono>
 #include <vector>
 
 namespace {
@@ -64,12 +65,26 @@ inline void sw8(uint32_t off, uint8_t v) { g_soundram[(off & 0x1FFFFF) ^ 3] = v;
 // Current time in V53 cycles (inside run() the core knows the exact cycle).
 uint64_t now_cycles() { return g_running ? g_run_base_time + (g_cpu.total_cycles() - g_run_base_cpu) : g_cpu_cycles; }
 
+// Diagnostics (env BURIKI_SNDPROF): where the sound board's time goes, printed every 600 frames.
+struct SndProf {
+    bool on = getenv("BURIKI_SNDPROF") != nullptr;
+    uint64_t runs = 0, run_calls = 0, gen_calls = 0, samples = 0, cycles = 0, drq = 0;
+    double cpu_s = 0, dsp_s = 0;
+} g_prof;
+struct ProfTimer {
+    double* acc; std::chrono::steady_clock::time_point t0;
+    explicit ProfTimer(double& a) : acc(g_prof.on ? &a : nullptr) { if (acc) t0 = std::chrono::steady_clock::now(); }
+    ~ProfTimer() { if (acc) *acc += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); }
+};
+
 // Generate sound chip output up to the given V53 cycle count (MAME stream->update()).
 void dsp_update_to(uint64_t cycles) {
     const uint64_t target = (uint64_t)((double)cycles * SAMPLES_PER_CYCLE);
     while (g_samples_done < target) {
         uint64_t chunk = std::min<uint64_t>(target - g_samples_done, 256);
         int32_t buf[512];
+        g_prof.gen_calls++; g_prof.samples += chunk;
+        ProfTimer pt(g_prof.dsp_s);
         g_dsp.generate(buf, (int)chunk);
         for (uint64_t i = 0; i < chunk * 2; i++) g_out.push_back((int16_t)std::clamp(buf[i], -32768, 32767));
         g_samples_done += chunk;
@@ -169,6 +184,9 @@ extern "C" void sound_init(const char* rom_dir, uint32_t ticks_per_frame, int pl
     cb.tout = [](int timer, int state) { if (timer == 2) g_cpu.set_input_line(v53::V53A::LINE_IRQ2, state != 0); };
 
     for (auto& b : m_bank) b = 0x1f;
+    // The same mapping as the mem_* callbacks above, done inside the core (env BURIKI_V53_CALLBACKS=1 goes
+    // back to the callbacks, to compare the two).
+    if (!getenv("BURIKI_V53_CALLBACKS")) g_cpu.set_fast_memory(g_soundram, m_bank, 0x1FFFFF);
     g_cpu.reset();
     g_cpu.set_halt_line(true);
     g_cpu.set_reset_line(true);
@@ -180,8 +198,22 @@ extern "C" void sound_init(const char* rom_dir, uint32_t ticks_per_frame, int pl
 }
 
 // Catch the sound board up to the current time. Called regularly from hw_events.
+// Experiments on how much the game depends on the sound board (see NOTES.md, "Sound board and rollback"):
+//   BURIKI_SOUND_FREEZE=N   from frame N the board stops: no CPU, no chip, its replies never change again.
+// And the save-state test's "nosound" option leaves the board out of the replays (savestate_skip_sound):
+// it is not run, and what the game sends it is dropped (it was sent the first time those frames played).
+static uint32_t sound_freeze_frame() {
+    static int v = -1;
+    if (v < 0) { const char* e = getenv("BURIKI_SOUND_FREEZE"); v = e ? atoi(e) : 0; }
+    return (uint32_t)v;
+}
+static bool sound_skipped() {
+    return savestate_skip_sound() || (sound_freeze_frame() && hw_frame_number() >= sound_freeze_frame());
+}
 extern "C" void sound_run(void) {
     if (!g_enabled) return;
+    if (sound_skipped()) { g_last_tick = g_ticks; return; }
+    g_prof.runs++;
     const uint64_t now = g_ticks;
     const uint64_t elapsed = now - g_last_tick;
     g_last_tick = now;
@@ -197,13 +229,15 @@ extern "C" void sound_run(void) {
             if (g_dsp.dma_running()) {
                 const uint64_t now_m = now_cycles() * 1000;
                 if (g_next_drq_millicycle <= now_m) {
+                    g_prof.drq++;
                     g_cpu.dreq(3, true);
                     g_next_drq_millicycle = std::max(g_next_drq_millicycle + DRQ_PERIOD_MILLICYCLES, now_m);
                 }
                 step = std::min<uint64_t>(step, (g_next_drq_millicycle - now_m + 999) / 1000);
                 if (step == 0) step = 1;
             }
-            g_cpu.run((int)step);
+            g_prof.run_calls++; g_prof.cycles += step;
+            { ProfTimer pt(g_prof.cpu_s); g_cpu.run((int)step); }
             dsp_update_to(now_cycles());
         }
     } else {
@@ -222,6 +256,22 @@ extern "C" void sound_frame(void) {
                 (int)g_dsp.dma_running(), main_latch[0], main_latch[1], sound_latch[0], sound_latch[1]);
     if (!g_out.empty()) audio_out_push(g_out.data(), (int)(g_out.size() / 2));
     g_out.clear();
+    if (g_prof.on && hw_frame_number() % 600 == 0) {
+        const double f = 600.0;
+        fprintf(stderr, "[sndprof] per frame: sound_run %.0f calls, cpu.run %.0f calls / %.0f clocks / %.3f ms, "
+                        "dsp %.0f calls / %.0f samples / %.3f ms, DMA requests %.0f\n",
+                g_prof.runs / f, g_prof.run_calls / f, g_prof.cycles / f, g_prof.cpu_s * 1000 / f,
+                g_prof.gen_calls / f, g_prof.samples / f, g_prof.dsp_s * 1000 / f, g_prof.drq / f);
+        fprintf(stderr, "[sndprof] per frame: %.0f instructions, %.0f slices, %.0f timer/DMA events, %.0f halted slices\n",
+                g_cpu.stat_instr / f, g_cpu.stat_slices / f, g_cpu.stat_events / f, g_cpu.stat_halted / f);
+        fprintf(stderr, "[sndprof] events per frame: interrupt controller %.0f, timers %.0f, DMA %.0f, serial clock %.0f\n",
+                g_cpu.stat_kind[0] / f, g_cpu.stat_kind[1] / f, g_cpu.stat_kind[2] / f, g_cpu.stat_kind[3] / f);
+        for (auto& k : g_cpu.stat_kind) k = 0;
+        g_cpu.stat_instr = g_cpu.stat_slices = g_cpu.stat_events = g_cpu.stat_halted = 0;
+        const bool on = g_prof.on;
+        g_prof = SndProf();
+        g_prof.on = on;
+    }
 }
 
 // Main CPU side, 0x68000000-0x6800000F (MAME main_sound_comms_r/w) and 0x6F000000.
@@ -235,6 +285,7 @@ extern "C" uint32_t sound_main_read(uint32_t pa) {
 extern "C" void sound_main_write(uint32_t pa, uint32_t v, uint32_t mask) {
     if (!g_enabled) return;
     sound_run();
+    if (savestate_skip_sound()) return;
     SLOG("main writes %08X = %08X (mask %08X)\n", pa, v, mask);
     if (pa == 0x68000000) {
         if (mask & 0xffff0000u) main_latch[0] = (uint16_t)(v >> 16);

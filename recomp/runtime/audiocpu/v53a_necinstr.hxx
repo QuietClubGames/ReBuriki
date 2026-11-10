@@ -233,20 +233,20 @@ void V53A::do_repnc(uint8_t next)
 {
 	uint16_t c = Wreg(CW);
 	switch(next) {
-		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && !CF && m_icount>0); Wreg(CW)=c; break;
+		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && !CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
 		default:    logerror("%06x: REPNC invalid\n",PC()); c = 0; (this->*s_nec_instruction[next])(); break;
 	}
 	if (c && !CF) {
@@ -261,20 +261,20 @@ void V53A::do_repc(uint8_t next)
 {
 	uint16_t c = Wreg(CW);
 	switch(next) {
-		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
-		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && CF && m_icount>0); Wreg(CW)=c; break;
+		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && CF && m_icount>m_soft_icount); Wreg(CW)=c; break;
 		default:    logerror("%06x: REPC invalid\n",PC()); c = 0; (this->*s_nec_instruction[next])(); break;
 	}
 	if (c && CF) {
@@ -289,20 +289,20 @@ void V53A::do_repne(uint8_t next)
 {
 	uint16_t c = Wreg(CW);
 	switch(next) {
-		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && !ZF && m_icount>0);    Wreg(CW)=c; break;
-		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && !ZF && m_icount>0);    Wreg(CW)=c; break;
-		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && !ZF && m_icount>0);    Wreg(CW)=c; break;
-		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && !ZF && m_icount>0);    Wreg(CW)=c; break;
+		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && !ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
+		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && !ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
+		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && !ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
+		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && !ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
 		default:    logerror("%06x: REPNE invalid\n",PC()); c = 0; (this->*s_nec_instruction[next])(); break;
 	}
 	if (c && !(ZF && ((next & 0x86) == 0x86))) {
@@ -317,20 +317,20 @@ void V53A::do_repe(uint8_t next)
 {
 	uint16_t c = Wreg(CW);
 	switch(next) {
-		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && ZF && m_icount>0);    Wreg(CW)=c; break;
-		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && ZF && m_icount>0);    Wreg(CW)=c; break;
-		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && m_icount>0); Wreg(CW)=c; break;
-		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && ZF && m_icount>0);    Wreg(CW)=c; break;
-		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && ZF && m_icount>0);    Wreg(CW)=c; break;
+		case 0x6c:  CLK(2); if (c) do { i_insb();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6d:  CLK(2); if (c) do { i_insw();  if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6e:  CLK(2); if (c) do { i_outsb(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0x6f:  CLK(2); if (c) do { i_outsw(); if (access_to_be_redone_noclear()) break; c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa4:  CLK(2); if (c) do { i_movsb(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa5:  CLK(2); if (c) do { i_movsw(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xa6:  CLK(2); if (c) do { i_cmpsb(); c--; } while (c>0 && ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
+		case 0xa7:  CLK(2); if (c) do { i_cmpsw(); c--; } while (c>0 && ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
+		case 0xaa:  CLK(2); if (c) do { i_stosb(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xab:  CLK(2); if (c) do { i_stosw(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xac:  CLK(2); if (c) do { i_lodsb(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xad:  CLK(2); if (c) do { i_lodsw(); c--; } while (c>0 && m_icount>m_soft_icount); Wreg(CW)=c; break;
+		case 0xae:  CLK(2); if (c) do { i_scasb(); c--; } while (c>0 && ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
+		case 0xaf:  CLK(2); if (c) do { i_scasw(); c--; } while (c>0 && ZF && m_icount>m_soft_icount);    Wreg(CW)=c; break;
 		default:    logerror("%06x: REPE invalid\n",PC()); c = 0; (this->*s_nec_instruction[next])(); break;
 	}
 	if (c && !(!ZF && ((next & 0x86) == 0x86))) {

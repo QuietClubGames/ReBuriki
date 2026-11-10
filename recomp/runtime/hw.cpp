@@ -418,8 +418,11 @@ void hw_game_option_set(int option, int value) {
 // Save state (savestate.h): every writable memory region, the CPU's registers, and this file's
 // own interrupt and timing state. ROM regions and counters kept only for diagnostics are left out.
 extern "C++" void hw_state(StateIO& io, void* recomp_ctx) {
-    for (Region& r : g_regions)
-        if (!r.read_only) io.raw(r.data, r.size);
+    for (Region& r : g_regions) {
+        if (r.read_only) continue;
+        if ((r.base == 0x60000000 || r.base == 0x68000000) && savestate_without_sound()) continue;   // the sound board's
+        io.raw(r.data, r.size);
+    }
     io.raw(recomp_ctx, sizeof(recomp_context));
     io.pod(g_ticks); io.pod(g_next_event); io.pod(g_cop0_status);
     io.pod(g_tlb);
