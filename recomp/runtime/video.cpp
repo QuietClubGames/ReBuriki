@@ -353,8 +353,26 @@ void tilemap_draw_roz_core_line(const Rect& cliprect, int tm, const TilemapKind&
     u32 startx = xtopleft, starty = ytopleft;
     const int incxx = xinc << 1, incxy = yinc2 << 1, incyx = xinc2 << 1, incyy = yinc << 1;
 
+    // DEVIATION FROM MAME (fade register choice). For layers with the fade bit (7) set, MAME
+    // always sends group L1 (bit 5) through fade 0 (tcram 0x18) and group L0 through fade 1
+    // (0x1C), "a complete guess". Buriki shows the choice is made by tcram 0x14 bits 16-17:
+    //   bit 16 set: group L0 uses fade 1, else fade 0;  bit 17 set: group L1 uses fade 1, else fade 0.
+    // Evidence, from the registers the game writes in attract mode:
+    //  - tcram 0x14 high = 0001 (MAME's mapping) on the FIGHTING WITHOUT WEAPON screen, the
+    //    character grid and the logo->static crossfade, which all look right MAME's way;
+    //  - = 0007 on the style-intro screens ("KARATE"...), where fade 1 is loaded with full black
+    //    and fade 0 with zero over L1 backgrounds. MAME's comment expects the backgrounds to go
+    //    black there, and with them hidden what's left (title, portrait, 3D fighter: sprites
+    //    and 3D) is the intended composition. MAME's mapping leaves the arena showing.
+    // With 0001 this is identical to MAME. Env BURIKI_MAME_FADE=1 restores MAME's mapping.
+    static const bool mame_fade = getenv("BURIKI_MAME_FADE") != nullptr;
     const u32* clut;
-    if ((get_tileregs(tm) >> 7) & 1) clut = ((get_tileregs(tm) >> 5) & 1) ? pal_fade0 : pal_fade1;
+    if ((get_tileregs(tm) >> 7) & 1) {
+        const bool l1 = (get_tileregs(tm) >> 5) & 1;
+        const u32 sel = mame_fade ? 0x1u : (m_tcram[0x14 / 4] >> 16);
+        const bool use_fade1 = l1 ? ((sel >> 1) & 1) : (sel & 1);
+        clut = use_fade1 ? pal_fade1 : pal_fade0;
+    }
     else clut = pal_main;
 
     const u32 width = k.cols * k.tile_w, height = k.rows * k.tile_h;
@@ -396,6 +414,9 @@ void draw_tilemap(int tm, int line) {
     const u8 enable = (tileregs >> 6) & 1;
     const u8 wrap = (tileregs >> 8) & 1;
     if (!enable) return;
+    // Diagnostics: env BURIKI_HIDE_TM = bit mask of tilemap layers (0-3) to skip.
+    static const int hide = getenv("BURIKI_HIDE_TM") ? atoi(getenv("BURIKI_HIDE_TM")) : 0;
+    if (hide & (1 << tm)) return;
 
     const TilemapKind& k = global_dimensions == 0 ? (big ? TM_16x16 : TM_8x8) : (big ? TM_16x16_ALT : TM_8x8);
     Rect clip = g_visarea;
@@ -775,6 +796,26 @@ extern "C" void video_init(const char* rom_dir) {
     fprintf(stderr, "[video] graphics ROMs loaded, %s\n", g_video_cfg.headless ? "headless" : "window open");
 }
 
+// Diagnostics (env BURIKI_LOGVID): print the video/transition registers whenever they change,
+// to see what the game asks the hardware for on a given screen.
+void log_video_state() {
+    static bool on = getenv("BURIKI_LOGVID") != nullptr;
+    if (!on) return;
+    static u32 last[0x18 + 0x0e] = {};
+    u32 cur[0x18 + 0x0e];
+    for (int i = 0; i < 0x18; i++) cur[i] = m_tcram[i];
+    for (int i = 0; i < 0x0e; i++) cur[0x18 + i] = m_videoregs[i];
+    if (!memcmp(cur, last, sizeof(cur))) return;
+    fprintf(stderr, "[vid %u]", hw_frame_number());
+    for (int i = 0; i < 0x18 + 0x0e; i++)
+        if (cur[i] != last[i]) {
+            if (i < 0x18) fprintf(stderr, " tc%02X=%08X", i * 4, cur[i]);
+            else fprintf(stderr, " vr%X=%08X", i - 0x18, cur[i]);
+        }
+    fprintf(stderr, "\n");
+    memcpy(last, cur, sizeof(cur));
+}
+
 bool video_hd_layers(HdLayers* out) {
     if (!g_layers_ok) return false;
     out->below = g_below;
@@ -793,6 +834,7 @@ extern "C" void video_frame(void) {
     // frame's 3D triangles (taken before the vblank clear below). Rendering only: game state
     // and the 512x448 picture are unchanged either way.
     const bool hd = !g_video_cfg.headless && fe_setting_enhanced();
+    log_video_state();
     {
         // Diagnostics: average time per frame for the 2D/3D picture, and how many 3D triangles
         // were drawn since the last 3D clear, every 600 frames.
