@@ -7,6 +7,10 @@
 #include "fe_internal.h"
 #include "ui.h"
 #include <wincodec.h>
+#include "../menu_art.h"
+#include <algorithm>
+#include <random>
+#include <vector>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -205,24 +209,38 @@ void uip_rect_hgrad(float x, float y, float w, float h, float radius, uint32_t l
     if (w > 0 && h > 0) rect_common(x, y, w, h, radius, left, right, left, right, 0, 0, 0, 0, 0);
 }
 
-// ---- optional menu art: menu_art.png (or .jpg) next to the exe, loaded once with WIC ----
-// Nothing is shipped: without the file the menu draws its plain panel.
-static ID3D11Texture2D* art_tex;
-static ID3D11ShaderResourceView* art_srv;
-static int art_w, art_h, art_tried;
+// ---- menu art ----
+// The fighting-style portraits built at start-up from the player's own sprite ROMs (menu_art.cpp); a
+// different one each time the menu opens. menu_art.png (or .jpg) next to the exe replaces them.
+struct ArtTex { ID3D11Texture2D* tex; ID3D11ShaderResourceView* srv; int w, h; };
+static std::vector<ArtTex> arts;
+static ID3D11ShaderResourceView* art_srv;    // the one being shown
+static int art_w, art_h, art_tried, art_fit, art_cur = -1;
+static std::vector<int> art_bag;              // shuffled order still to show
 static const GUID k_CLSID_WICImagingFactory = {0xcacaf262, 0x9370, 0x4615, {0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0x0a}};
 static const GUID k_IID_IWICImagingFactory = {0xec5ec8a9, 0xc395, 0x4314, {0x9c, 0x77, 0x54, 0xd7, 0xa9, 0x35, 0xff, 0x70}};
 static const GUID k_GUID_WICPixelFormat32bppPBGRA = {0x6fddc324, 0x4e03, 0x4bfe, {0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x10}};
 
-static void load_art() {
-    art_tried = 1;
+static void add_art(const void* px, int w, int h) {   // premultiplied BGRA
+    ArtTex a = {nullptr, nullptr, w, h};
+    D3D11_TEXTURE2D_DESC td = {};
+    td.Width = (UINT)w; td.Height = (UINT)h; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA sd = {px, (UINT)w * 4, 0};
+    if (SUCCEEDED(d3d_dev()->CreateTexture2D(&td, &sd, &a.tex)) &&
+        SUCCEEDED(d3d_dev()->CreateShaderResourceView(a.tex, nullptr, &a.srv)))
+        arts.push_back(a);
+    else rel(a.tex);
+}
+
+static void load_art_file() {
     static const char* names[] = {"menu_art.png", "menu_art.jpg", "menu_art.jpeg"};
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     IWICImagingFactory* wic = nullptr;
     if (FAILED(CoCreateInstance(k_CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, k_IID_IWICImagingFactory, (void**)&wic)))
         return;
     for (const char* name : names) {
-        if (art_srv) break;
+        if (!arts.empty()) break;
         std::string p = fe_path(name);
         if (GetFileAttributesA(p.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
         wchar_t wpath[MAX_PATH * 2];
@@ -239,14 +257,8 @@ static void load_art() {
             SUCCEEDED(conv->GetSize(&w, &h)) && w > 0 && h > 0 && w <= 8192 && h <= 8192) {
             uint8_t* px = (uint8_t*)malloc((size_t)w * h * 4);
             if (px && SUCCEEDED(conv->CopyPixels(nullptr, w * 4, w * h * 4, px))) {
-                D3D11_TEXTURE2D_DESC td = {};
-                td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                D3D11_SUBRESOURCE_DATA sd = {px, w * 4, 0};
-                if (SUCCEEDED(d3d_dev()->CreateTexture2D(&td, &sd, &art_tex)))
-                    d3d_dev()->CreateShaderResourceView(art_tex, nullptr, &art_srv);
-                art_w = (int)w; art_h = (int)h;
-                if (art_srv) fe_log("ui: menu art %s (%ux%u)", p.c_str(), w, h);
+                add_art(px, (int)w, (int)h);
+                if (!arts.empty()) fe_log("ui: menu art %s (%ux%u)", p.c_str(), w, h);
             }
             free(px);
         }
@@ -255,19 +267,63 @@ static void load_art() {
     wic->Release();
 }
 
+static void show_art(int i) {
+    art_cur = i;
+    art_srv = arts[i].srv; art_w = arts[i].w; art_h = arts[i].h;
+}
+
+static void load_art() {
+    art_tried = 1;
+    load_art_file();
+    art_fit = arts.empty();     // a picture of the player's own covers the panel; the portraits sit on the right
+    if (arts.empty()) {
+        for (const MenuArt& m : menu_art_all()) {
+            // the portraits' black backdrop becomes see-through, so they sit on the panel itself
+            std::vector<uint32_t> px(m.pixels);
+            for (uint32_t& c : px) if ((c & 0xFFFFFF) == 0) c = 0;
+            add_art(px.data(), m.w, m.h);
+        }
+        if (!arts.empty()) fe_log("ui: menu art: %zu fighting-style portraits", arts.size());
+    }
+    if (arts.empty()) return;
+    if (art_cur >= 0 && art_cur < (int)arts.size()) show_art(art_cur);   // after a device reset: keep it
+    else uip_art_next();
+}
+
+void uip_art_next(void) {
+    if (!art_tried) { if (d3d_dev()) load_art(); return; }
+    if (arts.empty()) return;
+    static std::mt19937 rng(GetTickCount());
+    if (art_bag.empty()) {       // a new shuffled round, never starting with the one just shown
+        for (int i = 0; i < (int)arts.size(); i++) art_bag.push_back(i);
+        std::shuffle(art_bag.begin(), art_bag.end(), rng);
+        if (art_bag.size() > 1 && art_bag.back() == art_cur) std::swap(art_bag.front(), art_bag.back());
+    }
+    int i = art_bag.back();
+    art_bag.pop_back();
+    show_art(i);
+}
+
 int uip_art_available(void) {
     if (!art_tried && d3d_dev()) load_art();
-    return art_srv != nullptr;
+    return !art_srv ? 0 : art_fit ? 2 : 1;
 }
 
 void uip_art(float x, float y, float w, float h, float radius, float alpha) {
     if (!art_srv || w <= 0 || h <= 0) return;
-    // cover: crop the image to the rectangle's shape, keeping the right-hand side (where the subject is)
+    uint32_t c = 0xFFFFFF00u | (uint32_t)(alpha * 255.0f + 0.5f);
     float ra = w / h, ia = (float)art_w / (float)art_h;
+    if (art_fit) {
+        // a portrait: whole, full height, against the right-hand edge (cropped on the left if wider)
+        float pw = h * ia;
+        if (pw <= w) rect_common(x + w - pw, y, pw, h, radius, c, c, c, c, 2, 0, 0, 1, 1);
+        else rect_common(x, y, w, h, radius, c, c, c, c, 2, 1 - w / pw, 0, 1, 1);
+        return;
+    }
+    // cover: crop the image to the rectangle's shape, keeping the right-hand side (where the subject is)
     float u0 = 0, u1 = 1, v0 = 0, v1 = 1;
     if (ia > ra) { float keep = ra / ia; u0 = 1 - keep; }
     else { float keep = ia / ra; v0 = (1 - keep) / 2; v1 = v0 + keep; }
-    uint32_t c = 0xFFFFFF00u | (uint32_t)(alpha * 255.0f + 0.5f);
     rect_common(x, y, w, h, radius, c, c, c, c, 2, u0, v0, u1, v1);
 }
 
@@ -338,7 +394,7 @@ static const char k_ui_shader[] =
     "float4 ps(VO i) : SV_Target {\n"
     "  if (i.prm.w > 0.5 && i.prm.w < 1.5) { float a = atlas.Sample(s0, i.uv) * i.col.a; return float4(i.col.rgb * a, a); }\n"
     "  if (i.prm.w > 1.5) { float d2 = sdbox(i.lp, i.hs, i.prm.x); float cov = 1 - smoothstep(-0.7, 0.7, d2);\n"
-    "    float4 t = art.Sample(s0, i.uv); float a = cov * i.col.a; return float4(t.rgb * a, a); }\n"
+    "    float4 t = art.Sample(s0, i.uv); float a = cov * i.col.a; return t * a; }\n"
     "  float d = sdbox(i.lp, i.hs, i.prm.x);\n"
     "  float aa = max(i.prm.z, 0.7);\n"
     "  float cover = 1 - smoothstep(-aa, aa, d);\n"
@@ -396,7 +452,11 @@ static int ui_init_gpu() {
 
 void ui_d3d_release(void) {
     rel(uvs); rel(ups); rel(ulayout); rel(ubuf); rel(ucb); rel(ublend); rel(usamp);
-    rel(atlas_srv); rel(atlas_tex); rel(art_srv); rel(art_tex);
+    rel(atlas_srv); rel(atlas_tex);
+    for (ArtTex& t : arts) { rel(t.srv); rel(t.tex); }
+    arts.clear();
+    art_bag.clear();
+    art_srv = nullptr;
     art_tried = 0;
     ubuf_cap = 0;
     g_font_scale = 0;

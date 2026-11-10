@@ -19,8 +19,10 @@ float uip_text_w(int font, const char* utf8);
 float uip_line_h(int font);
 // horizontal gradient rectangle (left -> right)
 void  uip_rect_hgrad(float x, float y, float w, float h, float radius, uint32_t left, uint32_t right);
-// optional menu art (menu_art.png next to the exe): drawn to cover the rectangle, clipped to its rounded corners
-int   uip_art_available(void);
+// menu art: the fighting-style portraits (whole, against the right edge), or menu_art.png next to the exe
+// (drawn to cover the rectangle); clipped to the rectangle's rounded corners
+int   uip_art_available(void);  // 0 none, 1 menu_art.png, 2 a portrait
+void  uip_art_next(void);     // show the next portrait (shuffled; called each time the menu opens)
 void  uip_art(float x, float y, float w, float h, float radius, float alpha);
 
 // ---- input ----

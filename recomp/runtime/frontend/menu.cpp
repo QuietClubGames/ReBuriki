@@ -228,7 +228,7 @@ void ui_menu_toggle(int device) {
     g_device = device;
     g_open = !g_open;
     g_quit_armed = 0;
-    if (g_open) select_valid(1);
+    if (g_open) { select_valid(1); uip_art_next(); }
 }
 void ui_menu_set_page(int page) {
     if (page >= 0 && page < NSECT) { g_sect = page; select_valid(1); }
@@ -362,11 +362,12 @@ static void draw_menu(float vw, float vh) {
     // soft shadow, then the glass panel
     uip_rect(px - 10, py + 6, W + 20, Hh + 20, 30, fade(0x00000090u, a), fade(0x00000090u, a), 0, 0, 34);
     uip_rect(px, py, W, Hh, 20, fade(COL_PANEL_TOP, a), fade(COL_PANEL_BOT, a), 1.5f, fade(0xFFFFFF1Cu, a), 0);
-    if (uip_art_available()) {
-        // menu art (menu_art.png next to the exe): under a dark gradient so the text stays readable
+    if (int art = uip_art_available()) {
+        // menu art (a fighting-style portrait, or menu_art.png): under a dark gradient so the text stays readable;
+        // the portraits are dark already, so they get a lighter one
         uip_art(px, py, W, Hh, 20, a);
-        uip_rect_hgrad(px, py, W, Hh, 20, fade(0x0E0F15F4u, a), fade(0x0E0F1550u, a));
-        uip_rect(px, py, W, Hh, 20, fade(0x0E0F1500u, a), fade(0x0E0F15C0u, a), 0, 0, 0);
+        uip_rect_hgrad(px, py, W, Hh, 20, fade(0x0E0F15F4u, a), fade(art == 2 ? 0x0E0F1508u : 0x0E0F1550u, a));
+        uip_rect(px, py, W, Hh, 20, fade(0x0E0F1500u, a), fade(art == 2 ? 0x0E0F1590u : 0x0E0F15C0u, a), 0, 0, 0);
         uip_rect(px, py, W, Hh, 20, 0, 0, 1.5f, fade(0xFFFFFF1Cu, a), 0);
     } else {
         // no art: a faint warm light from the right-hand side, so the plain panel isn't flat

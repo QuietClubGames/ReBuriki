@@ -755,6 +755,39 @@ void save_bmp(const std::string& path) {
 uint16_t g_color_buffer_3d[512 * 512];
 const uint32_t* video_framebuffer() { return g_bitmap; }
 
+// Assemble a picture from blocks of 16x16 8bpp sprite tiles, the way the sprite hardware draws a
+// chained sprite without per-tile entries (tile = first + column + row * columns). Pixels are
+// 0xAARRGGBB; colour 0 is transparent. Used for the menu art (menu_art.cpp).
+bool video_build_sprite_picture(const SpritePiece* pieces, int count, const uint32_t* pal256,
+                                std::vector<uint32_t>& out, int& w, int& h) {
+    if (count <= 0 || g_sprtile.empty()) return false;
+    int minx = 1 << 30, miny = 1 << 30, maxx = -(1 << 30), maxy = -(1 << 30);
+    for (int i = 0; i < count; i++) {
+        minx = std::min(minx, pieces[i].x); miny = std::min(miny, pieces[i].y);
+        maxx = std::max(maxx, pieces[i].x + pieces[i].cols * 16); maxy = std::max(maxy, pieces[i].y + pieces[i].rows * 16);
+    }
+    w = maxx - minx; h = maxy - miny;
+    if (w <= 0 || h <= 0 || w > 4096 || h > 4096) return false;
+    out.assign((size_t)w * h, 0);
+    const Gfx& g = g_gfx[5];   // 16x16, 8 bits per pixel
+    for (int i = 0; i < count; i++) {
+        const SpritePiece& p = pieces[i];
+        const u32 first = (p.raw_tile & 0x7ffff) >> 1;   // MAME get_tile_details, 8bpp
+        for (int ty = 0; ty < p.rows; ty++)
+            for (int tx = 0; tx < p.cols; tx++) {
+                const u32 code = (first + tx + ty * p.cols) % g.elements;
+                for (int y = 0; y < 16; y++)
+                    for (int x = 0; x < 16; x++) {
+                        const u8 c = gfx_pixel(g, code, x, y);
+                        if (!c) continue;
+                        const int ox = p.x - minx + tx * 16 + x, oy = p.y - miny + ty * 16 + y;
+                        out[(size_t)oy * w + ox] = 0xFF000000u | (pal256[c] & 0xFFFFFFu);
+                    }
+            }
+    }
+    return true;
+}
+
 extern "C" void video_init(const char* rom_dir) {
     std::string d = std::string(rom_dir) + "/buriki/";
     g_scrtile.assign(0x4000000, 0);
@@ -796,6 +829,33 @@ extern "C" void video_init(const char* rom_dir) {
     fprintf(stderr, "[video] graphics ROMs loaded, %s\n", g_video_cfg.headless ? "headless" : "window open");
 }
 
+// Diagnostics (env BURIKI_SPRITES=frame,frame,...): dump the sprite list and sprite registers
+// on those frames, to find which sprites make up a picture.
+void dump_sprites() {
+    static std::vector<uint32_t> frames = [] {
+        std::vector<uint32_t> v;
+        if (const char* e = getenv("BURIKI_SPRITES")) {
+            std::string s = e;
+            size_t p = 0;
+            while (p < s.size()) { size_t c = s.find(',', p); if (c == std::string::npos) c = s.size(); v.push_back((uint32_t)atoi(s.substr(p, c - p).c_str())); p = c + 1; }
+        }
+        return v;
+    }();
+    const uint32_t f = hw_frame_number();
+    if (std::find(frames.begin(), frames.end(), f) == frames.end()) return;
+    fprintf(stderr, "[spr %u] regs %08X %08X %08X tc4C %08X\n", f, m_spriteregs[0], m_spriteregs[1], m_spriteregs[2], m_tcram[0x4c / 4]);
+    // palette bank 4 (0x400-0x4FF), as raw palette RAM words
+    fprintf(stderr, "[pal %u]", f);
+    for (int i = 0x400; i < 0x500; i++) fprintf(stderr, " %08X", m_paletteram[i]);
+    fprintf(stderr, "\n");
+    for (int i = 0; i < (0xc000 / 4) / 8; i++) {
+        const u32* s = &m_spriteram[i * 8];
+        if (!(s[1] & 0xffff) || !(s[1] >> 16)) continue;   // zero zoom: not drawn
+        if (!s[0] && !s[4]) continue;
+        fprintf(stderr, "[spr %u] #%4d pos %08X zoom %08X ctl %08X pal %08X tile %08X\n", f, i, s[0], s[1], s[2], s[3], s[4]);
+    }
+}
+
 // Diagnostics (env BURIKI_LOGVID): print the video/transition registers whenever they change,
 // to see what the game asks the hardware for on a given screen.
 void log_video_state() {
@@ -835,6 +895,7 @@ extern "C" void video_frame(void) {
     // and the 512x448 picture are unchanged either way.
     const bool hd = !g_video_cfg.headless && fe_setting_enhanced();
     log_video_state();
+    dump_sprites();
     {
         // Diagnostics: average time per frame for the 2D/3D picture, and how many 3D triangles
         // were drawn since the last 3D clear, every 600 frames.

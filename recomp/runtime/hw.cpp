@@ -2,6 +2,7 @@
 // Reference: MAME src/mame/snk/hng64.cpp (main_map, sysregs, irqc, dmac, dualport, rtc).
 #include "hw.h"
 #include "input.h"
+#include "menu_art.h"
 #include "funcs.h"
 
 #include <algorithm>
@@ -420,6 +421,7 @@ void hw_init(const HwConfig* cfg) {
     add_region(0xC0000000, 0x2000, false, "comm dpram");
 
     video_init(cfg->rom_dir);
+    menu_art_build();               // the pause menu's portraits, from the sprite ROMs
     io_board_init(cfg->rom_dir, cfg->ticks_per_frame);
     sound_init(cfg->rom_dir, cfg->ticks_per_frame, cfg->sound_play, cfg->wav_path);
     input_print_help();

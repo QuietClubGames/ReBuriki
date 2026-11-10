@@ -300,7 +300,7 @@ the window's resolution; the presets render the 512x512 buffer at 2x-8x.
   mode, and whenever the screen can't be split (screen off).
 - **Checked:** the intro and the how-to-play screen (viewport + offset) match the software
   picture's layout, with smooth 3D edges and textures. Full 59 fps either way on an RTX 5070 Ti.
-- **Not done yet:** widescreen; menu art (`menu_art.png` hook exists, no art is shipped).
+- **Not done yet:** widescreen. (Menu art: done, see "Menu art" below.)
 
 ## Review, 2026-11-10
 
@@ -341,7 +341,7 @@ Other gaps:
 - The I/O board's serial EEPROM uses MAME's dualport 0x600 hack.
 - Sound: the rear/sub outputs and the L7A1045 delay effect aren't implemented (MAME doesn't
   have them either).
-- Widescreen, menu art, an installer/release package, and a README for players.
+- Widescreen, an installer/release package, and a README for players.
 
 ## Roadmap
 
@@ -386,3 +386,27 @@ The build compiles `frontend/` with the other runtime subfolders and links d3d11
   system capture none toast pause), `--test-keys "N:key,..."`, `--set key=value`. The 2400-frame scripted
   run (`1300=coin1;1306=;1400=p1start;1406=`) still gives RAM fingerprint 465E4B3381689AC5, headless and
   windowed with a 4 s menu pause at frame 1350.
+
+## Menu art (2026-11-10): done
+
+The pause menu shows one of the ten fighting-style portraits from the attract mode's style-intro
+screens, a different one each time it opens (shuffled rounds, never the same twice in a row).
+
+- **Nothing is shipped.** `runtime/menu_art.cpp` holds only recipes: each portrait's sprite tile
+  numbers and block positions, as the game's own sprite list has them. At start-up (after
+  `video_init`, ~instant) `video_build_sprite_picture` builds the pictures from the player's sprite
+  ROMs with the 256-colour palette at **cart offset 0x3C3440**. The game loads that palette into
+  bank 4 for these screens and dims entries 209-223 to ~62%. We use the undimmed ROM colours.
+  The 0x3C0400 table only shares the first 17 UI colours.
+- How they were found: `BURIKI_SPRITES=<frame>` on each style intro. The portrait is the chained
+  block at depth 0x2F5. `tools/find_palette.py` and `tools/find_colours.py` search the cart for a
+  captured `[pal N]` palette.
+- `BURIKI_DUMP_ART=<dir>` saves them as `portrait_NN.bmp`.
+- Front end (`fe_ui_d3d11.cpp`):
+  - one texture per portrait; their black backdrop is made see-through;
+  - drawn whole at full panel height against the right edge (the 432-wide Professional
+    Wrestling one is cropped on the left), under a lighter gradient than photo art gets;
+  - `uip_art_next()` runs on each menu open;
+  - a `menu_art.png`/`.jpg` next to the exe still replaces them (drawn to cover the panel).
+- The eighth portrait (second loop, third style) is a woman in a gi. Its style name is unconfirmed
+  (likely Aikido). Names aren't shown anywhere.
