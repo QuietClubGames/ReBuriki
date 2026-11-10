@@ -408,5 +408,4 @@ screens, a different one each time it opens (shuffled rounds, never the same twi
     Wrestling one is cropped on the left), under a lighter gradient than photo art gets;
   - `uip_art_next()` runs on each menu open;
   - a `menu_art.png`/`.jpg` next to the exe still replaces them (drawn to cover the panel).
-- The eighth portrait (second loop, third style) is a woman in a gi. Its style name is unconfirmed
-  (likely Aikido). Names aren't shown anywhere.
+- The eighth portrait (second loop, third style) is Aikido (confirmed by the user). Names aren't shown anywhere.
