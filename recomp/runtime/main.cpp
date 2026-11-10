@@ -14,7 +14,8 @@
 //     --ticks-per-frame N   virtual time per frame (default 50000)
 //     --io-log N            print the first N distinct hardware accesses (default 300)
 //     --trace-io            print every hardware access
-//     --roms DIR            folder with buriki/ and hng64/ (default D:/Buriki/roms)
+//     --roms DIR            folder with buriki/ and hng64/ (default: "roms" next to the exe, as
+//                           installed, or one folder up, as in the source tree)
 //     --bios FILE           BIOS in hng64/ (default: the menu's region, USA; headless: brom1.bin, Japan)
 //     --nvram FILE          keep the arcade's save memory in FILE (default: nvram.bin next to the exe
 //                           with a window; off when headless)
@@ -27,6 +28,10 @@
 //     --test-keys "N:key,..."  tests: press keys (esc tab enter up down left right q e f9 f11) at displayed
 //                           frame N (frames keep counting while the menu is open). Doesn't save settings.
 //                           Doesn't write settings, controls or save memory.
+//
+// Without a console (the installed game is built as a Windows program) everything printed goes to
+// buriki.log next to the exe (the run before is kept as buriki.old.log), and a fatal error or crash
+// shows a message box.
 //
 // Window keys: Tab / Esc menu (or Back + Start on a pad), Alt+Enter / F11 full screen, F2 Test, 9 Service.
 #include <chrono>
@@ -48,19 +53,65 @@
 static recomp_context g_ctx;
 
 #ifdef _WIN32
+static bool g_log_to_file = false;     // no console: stderr goes to buriki.log
+
+static std::string exe_dir() {
+    char exe[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, exe, sizeof exe);
+    while (n > 0 && exe[n - 1] != '\\' && exe[n - 1] != '/') n--;
+    return std::string(exe, n);
+}
+
+static void fatal_box(const char* message) {
+    if (!g_log_to_file) return;
+    std::string text = std::string("Buriki One has to stop:\n\n") + message +
+                       "\n\nThe details are in buriki.log, in the game's folder.";
+    MessageBoxA(nullptr, text.c_str(), "Buriki One", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+}
+
 static LONG WINAPI on_crash(EXCEPTION_POINTERS* e) {
     fprintf(stderr, "\n[CRASH] host exception %08lX at %p\n",
             e->ExceptionRecord->ExceptionCode, e->ExceptionRecord->ExceptionAddress);
     hw_dump_recent_functions();
     hw_report();
     fflush(stderr);
+    char msg[96];
+    snprintf(msg, sizeof msg, "the program crashed (error %08lX).", e->ExceptionRecord->ExceptionCode);
+    fatal_box(msg);
     return EXCEPTION_EXECUTE_HANDLER;
 }
+
+// The installed game has no console. Send everything it prints to buriki.log next to the exe.
+static void log_to_file_if_no_console() {
+    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+    if (h != nullptr && h != INVALID_HANDLE_VALUE) return;      // a console, or redirected by a test
+    const std::string log = exe_dir() + "buriki.log", old = exe_dir() + "buriki.old.log";
+    MoveFileExA(log.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING);
+    if (freopen(log.c_str(), "w", stderr)) g_log_to_file = true;
+    freopen("NUL", "w", stdout);
+}
+
+// "roms" next to the exe (installed), else one folder up (the source tree: recomp\buriki.exe, roms\).
+static std::string default_rom_dir() {
+    for (const char* rel : {"roms", "..\\roms"}) {
+        const std::string d = exe_dir() + rel;
+        const DWORD a = GetFileAttributesA(d.c_str());
+        if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) return d;
+    }
+    return exe_dir() + "roms";
+}
+#else
+static std::string default_rom_dir() { return "roms"; }
 #endif
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    log_to_file_if_no_console();
+    g_fatal_hook = fatal_box;
+#endif
     HwConfig cfg = {};
-    cfg.rom_dir = "D:/Buriki/roms";
+    static const std::string rom_dir_default = default_rom_dir();
+    cfg.rom_dir = rom_dir_default.c_str();
     cfg.max_frames = 0;
     cfg.ticks_per_frame = 50000;
     cfg.io_log_limit = 300;

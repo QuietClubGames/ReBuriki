@@ -7,6 +7,8 @@ Sections come from tools/sections.py. Their images are concatenated into one ROM
 the next function's entry and trailing zero padding is trimmed, so nothing overlaps.
 """
 import struct, sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (the installer's Python doesn't add it)
 from sections import SECTIONS, COMBINED_ROM
 
 out_path = sys.argv[1]

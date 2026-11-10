@@ -38,3 +38,7 @@ recomp/menu_art.png
 __pycache__/
 recomp/*.out
 recomp/soak_script.txt
+
+# --- Installer packages (tools/install/make_package.py) ---
+dist/
+tools/install/*.ico

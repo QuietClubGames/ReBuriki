@@ -22,6 +22,9 @@ extern uint32_t g_func_ring_pos;
 void hw_dump_recent_functions(void);
 void hw_report(void);                  // prints the hardware access summary
 [[noreturn]] void hw_fatal(const char* fmt, ...);
+// Called with the message just before hw_fatal exits (main.cpp shows it in a message box when the
+// game runs without a console, as the installed game does).
+extern void (*g_fatal_hook)(const char* message);
 
 // ---- setup ---------------------------------------------------------------------------
 struct HwConfig {

@@ -363,16 +363,19 @@ void hw_note_nan(const char* func, void* vctx) {
     }
 }
 
+void (*g_fatal_hook)(const char* message) = nullptr;
+
 void hw_fatal(const char* fmt, ...) {
+    char msg[1024];
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "\n[FATAL] ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
+    vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
+    fprintf(stderr, "\n[FATAL] %s\n", msg);
     hw_dump_recent_functions();
     hw_report();
     fflush(stderr);
+    if (g_fatal_hook) g_fatal_hook(msg);
     exit(3);
 }
 

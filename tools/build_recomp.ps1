@@ -19,7 +19,7 @@ if ($Ghidra) {
     & "$root\third_party\ghidra_12.2_PUBLIC\support\analyzeHeadless.bat" "$root\work\ghidra" buriki -overwrite `
         -import "$root\work\buriki_code_80000000.bin" -loader BinaryLoader -loader-baseAddr 0x80000000 `
         -processor "MIPS:BE:64:64-32addr" -scriptPath "$root\tools\ghidra_scripts" `
-        -postScript SeedAndExport.java "$root\work\functions_raw.txt" | Out-Null
+        -postScript SeedAndExport.java "$root\tools\data\functions_game.txt" | Out-Null
 }
 
 if (-not (Test-Path "$root\work\bios_9fc00000.bin")) { Copy-Item "$root\roms\hng64\brom1.bin" "$root\work\bios_9fc00000.bin" }
@@ -27,7 +27,7 @@ if ($Ghidra) {
     & "$root\third_party\ghidra_12.2_PUBLIC\support\analyzeHeadless.bat" "$root\work\ghidra" buriki -overwrite `
         -import "$root\work\bios_9fc00000.bin" -loader BinaryLoader -loader-baseAddr 0x9FC00000 `
         -processor "MIPS:BE:64:64-32addr" -scriptPath "$root\tools\ghidra_scripts" `
-        -postScript SeedAndExport.java "$root\work\bios_functions_raw.txt" "$root\tools\bios_seeds.txt" | Out-Null
+        -postScript SeedAndExport.java "$root\tools\data\functions_bios.txt" "$root\tools\bios_seeds.txt" | Out-Null
 }
 
 Push-Location "$root\recomp"
@@ -37,7 +37,8 @@ try {
     python "$root\tools\find_kernel_funcs.py" buriki.syms.toml kernel_funcs.txt
     if ($LASTEXITCODE) { throw "kernel function check failed" }
     python -I "$root\tools\make_func_table.py" buriki.syms.toml "$rt\func_table.cpp"
-    & "$root\tools\make_recomp_header.ps1"
+    python -I "$root\tools\make_recomp_header.py" "$root\third_party\N64Recomp\include\recomp.h" "$rt\recomp_mem_section.txt" "$rt\recomp.h"
+    if ($LASTEXITCODE) { throw "recomp.h generation failed" }
     # Run through cmd so warnings on stderr are logged rather than treated as PowerShell errors.
     cmd /c "`"$root\third_party\N64Recomp\build\N64Recomp.exe`" buriki.toml > recomp_log.txt 2>&1"
     if ($LASTEXITCODE) { Get-Content recomp_log.txt -Tail 20; throw "N64Recomp failed, see recomp\recomp_log.txt" }

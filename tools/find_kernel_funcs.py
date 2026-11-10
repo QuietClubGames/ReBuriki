@@ -6,6 +6,8 @@ ignored in the recomp config and rewritten by hand in the runtime (runtime/kerne
 Usage: find_kernel_funcs.py <syms.toml> <report.txt>
 """
 import re, struct, sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (the installer's Python doesn't add it)
 from sections import COMBINED_ROM
 syms, report_path = sys.argv[1:3]
 rom = open(COMBINED_ROM, 'rb').read()

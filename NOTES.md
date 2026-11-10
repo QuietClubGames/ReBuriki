@@ -341,7 +341,7 @@ Other gaps:
 - The I/O board's serial EEPROM uses MAME's dualport 0x600 hack.
 - Sound: the rear/sub outputs and the L7A1045 delay effect aren't implemented (MAME doesn't
   have them either).
-- An installer/release package, and a README for players.
+- (Installer and player README: done, see "Installer" below.)
 
 ## Roadmap
 
@@ -450,3 +450,51 @@ arena, crowd and floor are 2D tilemaps (the floor is a "line mode" perspective t
   inside the margin, at its starting position.
 - **Test options added:** `--shot-every N --shot-dir DIR` (window screenshots),
   `BURIKI_WINDOW=WxH` (any window shape).
+
+## Installer (2026-11-10): done
+
+`python tools/install/make_package.py` makes `dist/ReBuriki-Setup/` and `dist/ReBuriki-Setup.zip`
+(311 MB unpacked, 78 MB zipped). Modelled on ReLayer's installer (`tools/install` in D:/ReLayer).
+The package has **no ROM data and nothing made from the ROMs**: Setup builds the game on the
+player's PC from their own `buriki.zip` and `hng64.zip`.
+
+- **Names** are in one place, `tools/install/product.py`: product "ReBuriki", exe `ReBuriki.exe`,
+  version 0.1.0, publisher QuietClubGames. "ReBuriki" is a working name the user hasn't confirmed.
+- **Package contents:** `Setup.exe`, `README.txt` (player guide), `licenses/`, and `files/`:
+  - `python/`: trimmed Python, standard library only;
+  - `clang/`: 64-bit clang++ from llvm-mingw with the C++ and Windows headers and libraries;
+  - `n64recomp/`: `N64Recomp.exe` and its `recomp.h`;
+  - `source/`: the tracked build inputs (`recomp/runtime`, `recomp/buriki.toml`, the build tools,
+    `tools/data`).
+- **`Setup.exe`** (`setup_win32.c`, adapted from ReLayer's): two ROM rows, install folder,
+  shortcuts, progress from the build's `@@progress` lines, `setup.log`, per-user "Apps" entry,
+  and `Uninstall.exe` (asks whether to keep settings). It finds the zips next to itself, one
+  folder up, or in Downloads. Test switches: `/rom= /bios= /dest= /silent /noshortcuts
+  /noregister /shot=`.
+- **`build_from_rom.py`** (also runs on the dev machine with the tools on PATH):
+  1. finds the 33 game files and 4 system files by size + CRC-32, whatever they're named
+     (`brom1.bin` and `tmp87ph40an.bin` required; `bios_us.bin`, `bios_export.bin` optional);
+  2. cuts the code images, makes the symbols, runs N64Recomp and `fix_generated.py`;
+  3. compiles 60 files in parallel (generated code -O1, runtime -O2) and links `-static
+     -mwindows` with icon and version details;
+  4. runs the new exe headless for 300 frames as a boot test;
+  5. moves the ROM data to `<dest>/roms` and copies the exe.
+  Everything is written under `<dest>\_build` (removed afterwards); the source is only read.
+- **Function lists** are now tracked in `tools/data/functions_game.txt` and `functions_bios.txt`
+  (addresses only, from Ghidra), so a build needs neither Ghidra nor Java. `BURIKI_WORK` points
+  the symbol tools at a scratch folder. `make_recomp_header.ps1` became `make_recomp_header.py`
+  (same output).
+- **Runtime changes for an installed game** (`main.cpp`, `hw.cpp`):
+  - the ROM folder defaults to `roms` next to the exe, else one folder up (the source tree);
+  - with no console, output goes to `buriki.log` next to the exe (previous run:
+    `buriki.old.log`), and a fatal error or crash shows a message box.
+- **Licences:** `LICENSE.md` (a draft: MIT for the project's own code, MAME-ported files keep
+  LGPL-2.1+ / BSD-3-Clause, ReLayer and N64Recomp parts MIT) and `licenses/`.
+- **Checked:**
+  - Unzipped the package to a clean temp folder and ran Setup silently with PATH cut down to
+    Windows' own folders: installed in ~10 s on this 28-thread PC.
+  - The installed exe imports only Windows DLLs. Its frames at 600-3000 of the soak script are
+    byte-identical to `frames_soak_ref`. A windowed widescreen run wrote `buriki.log`.
+  - Wrong sets give plain messages (not Buriki One; system ROMs missing; files missing).
+- **Not tested:** a normal interactive install (shortcuts, the Apps entry) and Uninstall, which
+  need clicking through; and a slow or low-memory PC.
