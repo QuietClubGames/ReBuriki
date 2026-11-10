@@ -9,10 +9,10 @@ project's source (tracked files only). It holds NO ROM data and nothing made fro
 game from the player's own buriki.zip and hng64.zip. Needs the developer toolchain on PATH
 (x86_64-w64-mingw32-clang++, llvm-mingw), N64Recomp built in third_party/N64Recomp/build, and Pillow (icon).
 
-setup_art.png (or .jpg / .webp) in the repo root, if present, becomes the picture down the right-hand side of
-the Setup window (files/setup_art.png); icon_art.png, if present, becomes the icon of Setup.exe and of the game.
-Neither is kept in the repository (.gitignore): official artwork belongs to
-the game's owners, so whether a public download carries one is a decision for whoever publishes it.
+setup_art.png (or .jpg / .webp) in the repo root becomes the picture down the right-hand side of the Setup
+window (files/setup_art.png); icon_art.png becomes the icon of Setup.exe and of the game. Both are official
+Buriki One artwork (the only game material in the repository and the package, kept at the owner's choice).
+Without them Setup is a plain dark window and the icon a plain "B1".
 
 Adapted from ReLayer's tools/install/make_package.py (Copyright (c) 2026 The ReLayer project, MIT License).
 The names (product, exe, version, publisher) are in product.py.
@@ -99,7 +99,7 @@ def make_logo_icon(src, ico):
 
 def make_icon():
     """The icon for Setup.exe and the game. icon_art.png (or .jpg / .webp) in the repo root, if present, is
-    used (see make_logo_icon; like setup_art it is not kept in the repository). Otherwise a plain icon in the
+    used (see make_logo_icon). Otherwise a plain icon in the
     menu's colours: dark tile, white "B1", gold bar, no game artwork."""
     from PIL import Image, ImageDraw, ImageFont
     ico = os.path.join(HERE, "game.ico")

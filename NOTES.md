@@ -478,13 +478,12 @@ player's PC from their own `buriki.zip` and `hng64.zip`.
 - **Setup picture:** `setup_art.png` (or .jpg/.webp) in the repo root becomes
   `files/setup_art.png`, shown full height down the right of the window under a dark overlay
   that fades it into the panel. The window widens to fit the picture's shape. Without the file
-  the window is the plain dark column. The file is gitignored: the user's picture is official
-  Buriki One artwork, so it stays out of the repository, and whether a public download carries
-  it is their call.
+  the window is the plain dark column. The picture is official Buriki One artwork; the user
+  chose to keep it in the repository and the package (2026-11-10).
 - **Icon:** `icon_art.png` (or .jpg/.webp) in the repo root becomes the icon of `Setup.exe` and of
   the game: on a black rounded tile, with a thin light outline so the logo's dark navy lettering
-  shows against the black. Without the file it's the plain "B1" icon. Gitignored like
-  `setup_art.png`, for the same reason (the user's file is the official Buriki One logo).
+  shows against the black. Without the file it's the plain "B1" icon. It is the official
+  Buriki One logo, kept in the repository like `setup_art.png` at the user's choice.
 - **`build_from_rom.py`** (also runs on the dev machine with the tools on PATH):
   1. finds the 33 game files and 4 system files by size + CRC-32, whatever they're named
      (`brom1.bin` and `tmp87ph40an.bin` required; `bios_us.bin`, `bios_export.bin` optional);
