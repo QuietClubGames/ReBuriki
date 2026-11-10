@@ -459,7 +459,7 @@ The package has **no ROM data and nothing made from the ROMs**: Setup builds the
 player's PC from their own `buriki.zip` and `hng64.zip`.
 
 - **Names** are in one place, `tools/install/product.py`: product "ReBuriki", exe `ReBuriki.exe`,
-  version 0.1.0, publisher QuietClubGames. "ReBuriki" is a working name the user hasn't confirmed.
+  version 0.1.0, publisher QuietClubGames. The user confirmed the name ReBuriki (2026-11-10).
 - **Package contents:** `Setup.exe`, `README.txt` (player guide), `licenses/`, and `files/`:
   - `python/`: trimmed Python, standard library only;
   - `clang/`: 64-bit clang++ from llvm-mingw with the C++ and Windows headers and libraries;
