@@ -52,6 +52,9 @@ private:
     uint64_t m_regs[REGS_PER_VOICE][NUM_VOICES] = {};
     std::vector<uint8_t> m_rom;     // 16 MB sample ROM ("l6028_rom" space)
     std::vector<uint8_t> m_ram;     // 128 KB sample RAM ("l6028" space)
+public:
+    std::vector<uint8_t>& state_ram() { return m_ram; }   // for save states (sound.cpp)
+private:
 
     uint16_t ram_word(uint32_t byteaddr) const;
     void ram_write_word(uint32_t byteaddr, uint16_t v);

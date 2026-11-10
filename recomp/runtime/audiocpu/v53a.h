@@ -168,6 +168,9 @@ public:
 	uint64_t total_cycles() const { return now(); }
 	uint64_t log_count() const { return m_log_count; }
 	const std::string &last_log() const { return m_last_log; }
+	// Before a save state copies this object as raw bytes (sound.cpp): the one member that owns heap memory
+	// is emptied, so the copy holds nothing that could go stale.
+	void state_prepare() { m_last_log.clear(); m_last_log.shrink_to_fit(); }
 	uint8_t opsel() const { return m_OPSEL; }
 	uint8_t opha() const { return m_OPHA; }
 	uint8_t sctl() const { return m_SCTL; }

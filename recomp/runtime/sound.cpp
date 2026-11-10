@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include "savestate.h"
 #include <vector>
 
 namespace {
@@ -254,4 +255,20 @@ extern "C" void sound_report(void) {
             (unsigned long long)g_keyons, (unsigned long long)g_dma_words, (unsigned long long)g_cpu.log_count(),
             g_cpu.log_count() ? ", last: " : "", g_cpu.log_count() ? g_cpu.last_log().c_str() : "");
     audio_out_close();
+}
+
+// Save state (savestate.h). The two chip objects are copied as raw bytes: their callbacks and buffer
+// pointers don't change after start-up, so the bytes put back are the ones that were there. The chip's
+// sample RAM lives outside the object and is copied separately. Sound waiting to be played is dropped
+// on a load. A proper netplay build should save these field by field instead.
+void sound_state(StateIO& io) {
+    g_cpu.state_prepare();
+    io.raw(&g_cpu, sizeof g_cpu);
+    io.raw(&g_dsp, sizeof g_dsp);
+    io.raw(g_dsp.state_ram().data(), g_dsp.state_ram().size());
+    io.pod(g_enabled); io.pod(g_running); io.pod(m_bank); io.pod(main_latch); io.pod(sound_latch);
+    io.pod(g_last_tick); io.pod(g_cycle_remainder); io.pod(g_cpu_cycles);
+    io.pod(g_run_base_time); io.pod(g_run_base_cpu); io.pod(g_samples_done); io.pod(g_next_drq_millicycle);
+    io.pod(g_dma_words); io.pod(g_keyons);
+    if (!io.saving) g_out.clear();
 }

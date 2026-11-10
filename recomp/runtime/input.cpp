@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include "hw.h"
+#include "savestate.h"
 #include "frontend/frontend.h"
 
 namespace {
@@ -142,4 +143,10 @@ void input_print_help(void) {
         "[input] Player 1: arrows + Z X C V, start 1, coin 5 | Player 2: R F D G + A S Q W, start 2, coin 6\n"
         "[input] Service 9, Test F2, Tab / Esc menu | Gamepads: stick/d-pad, X Y A B = buttons 1-4, Start, Back = coin,\n"
         "[input] Back + Start menu (defaults; remap in the menu's Controls page or controls.ini)\n");
+}
+
+// Save state (savestate.h): the control latches the I/O board reads, and coins still being counted.
+void input_state(StateIO& io) {
+    io.pod(g_frame);
+    io.pod(g_coin);
 }

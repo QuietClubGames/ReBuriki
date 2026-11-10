@@ -4,6 +4,7 @@
 #include "input.h"
 #include "video.h"
 #include "menu_art.h"
+#include "savestate.h"
 #include "funcs.h"
 
 #include <algorithm>
@@ -414,6 +415,22 @@ void hw_game_option_set(int option, int value) {
     fprintf(stderr, "[options] arcade option %d = %d\n", option, value);
 }
 
+// Save state (savestate.h): every writable memory region, the CPU's registers, and this file's
+// own interrupt and timing state. ROM regions and counters kept only for diagnostics are left out.
+extern "C++" void hw_state(StateIO& io, void* recomp_ctx) {
+    for (Region& r : g_regions)
+        if (!r.read_only) io.raw(r.data, r.size);
+    io.raw(recomp_ctx, sizeof(recomp_context));
+    io.pod(g_ticks); io.pod(g_next_event); io.pod(g_cop0_status);
+    io.pod(g_tlb);
+    io.pod(g_irq_pending); io.pod(g_irq_level);
+    io.pod(g_dma_src); io.pod(g_dma_dst); io.pod(g_dma_len);
+    io.pod(g_mcu_en);
+    io.pod(g_in_vblank); io.pod(g_frame);
+    io.pod(g_next_vblank); io.pod(g_vblank_end); io.pod(g_fifo_irq_at); io.pod(g_next_mcu);
+    io.pod(g_in_irq);
+}
+
 void hw_tlb_write(uint32_t index, uint32_t pagemask, uint32_t entryhi, uint32_t phys0, uint32_t phys1) {
     if (index >= 48) hw_fatal("TLB index %u out of range", index);
     g_tlb[index] = {true, pagemask, entryhi & 0xFFFFE000u, phys0, phys1};
@@ -651,7 +668,7 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
         g_vblank_end = g_ticks + g_cfg.ticks_per_frame / 12;
         g_in_vblank = true;
         g_frame++;
-        { PerfTimer t(g_perf_video); video_frame(); }   // draw + present the frame the game just built
+        if (!savestate_skip_video()) { PerfTimer t(g_perf_video); video_frame(); }   // draw + present the frame the game just built
         input_sample_frame();        // controls for the next frame
         { PerfTimer t(g_perf_sound); sound_frame(); }   // this frame's audio to the speakers / WAV
         raise_irq(1u << 0);
@@ -691,6 +708,9 @@ void hw_events(uint8_t* rdram, recomp_context* ctx) {
             g_perf_video = g_perf_sound = g_perf_io = 0;
         }
         hw_debug_frame();
+        // Save-state test (env BURIKI_SAVETEST). The place in the recompiled code this frame ended at is
+        // where hw_events was called from.
+        savestate_frame(ctx, __builtin_return_address(0), g_in_irq);
         if (g_cfg.max_frames && g_frame >= g_cfg.max_frames) {
             // Fingerprint of main RAM: two runs with the same inputs must print the same value.
             uint64_t h = 1469598103934665603ull;

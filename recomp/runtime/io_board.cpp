@@ -4,6 +4,7 @@
 // port 0), and raises main-CPU interrupt level 17 (bit 0x20000).
 //
 // Wiring follows MAME src/mame/snk/hng64.cpp (ioport0/1/3/7 handlers, tempio irq timers).
+#include "savestate.h"
 #include "hw.h"
 #include "input.h"
 #include "iomcu/tlcs870.h"
@@ -87,4 +88,12 @@ extern "C" void io_board_run(void) {
     g_cycle_remainder = num % g_ticks_per_frame;
     if (cycles > 0) g_mcu.run(cycles);
     if (g_int0 && now >= g_int0_off_at) { g_mcu.set_input_line(0, false); g_int0 = false; }
+}
+
+// Save state (savestate.h). The microcontroller object is copied as raw bytes (its callbacks don't
+// change after start-up); see the note in sound.cpp.
+void io_board_state(StateIO& io) {
+    io.raw(&g_mcu, sizeof g_mcu);
+    io.pod(g_enabled); io.pod(m_port1); io.pod(m_port7); io.pod(m_ex_ramaddr); io.pod(m_ex_ramaddr_upper);
+    io.pod(g_last_tick); io.pod(g_cycle_remainder); io.pod(g_int0_off_at); io.pod(g_int0);
 }

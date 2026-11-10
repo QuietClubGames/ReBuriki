@@ -705,3 +705,80 @@ Over 12,000 frames of the soak script, every frame of every fight ended in the i
 frames per 600 end elsewhere, at other depths. So during fights the game is always at the same
 place in the same chain of calls when a frame ends, which is what a save state without copying
 the host stack needs. Not yet tried: actually saving and restoring.
+
+## Save states: the feasibility test for rollback netplay (2026-11-10)
+
+**Result: saving and restoring the whole machine works, exactly. Replays are fast enough for one or
+two frames of rollback today; the sound board is what limits more.**
+
+### Why it works
+
+The recompiled game is native code on the host's own stack, so a state can only be put back where
+the host stack is the same as when it was taken. The game's main loop (`func_800080B0`) sets a
+flag at gp+0x2C16 and spins at label `L_800080F0` until the vblank interrupt clears it. Every
+frame of a fight ends there: one place in the code, one stack depth (stack pointer 803FFFC0),
+with nothing live in host locals. At that point the machine is fully described by its emulated
+state, so a copy of that state is a save state. No host stack is copied.
+
+### What a state holds (`savestate.h`, `*_state` in each module), 23.8 MB
+
+- `hw_state`: every writable memory region (main RAM 16 MB, video and sprite RAM, palette, the 3 MB
+  framebuffer region, sound RAM 4 MB, save memory, dual-port RAM, system registers), the CPU's
+  `recomp_context`, the TLB, interrupt, DMA and timing state.
+- `sound_state`: the V53A and L7A1045 objects as raw bytes, the chip's 128 KB sample RAM, the
+  latches and scheduler counters. Sound waiting to be played is dropped on a load.
+- `io_board_state`: the TLCS-870 object as raw bytes and the board's port state.
+- `input_state`: the control latches and coin pulses.
+- Not saved: the 3D renderer's buffers and matrices and the 2D picture (rebuilt every frame,
+  never read by the game), diagnostics counters, the audio device.
+- The chip objects are copied raw because their callbacks and buffer pointers never change after
+  start-up (`V53A::state_prepare` empties the one string that owns heap memory first). That is
+  fine for rollback, where states never leave the process. A state sent to another PC or kept on
+  disk would need field-by-field saving.
+
+### The test (`savestate.cpp`, env `BURIKI_SAVETEST=N,K[,R][,novideo][,nohash][,loop]`)
+
+Save at the end of frame N, play K frames noting a fingerprint of main RAM each frame, put the
+state back, play the same K frames again with the same scripted controls, and compare every frame
+and the whole machine at the end. `loop` chains R such cycles; `novideo` skips drawing in replays.
+A frame that doesn't end at the wait point can't be loaded at; such cycles are counted as skipped.
+
+| Run (headless, soak script) | Result |
+|---|---|
+| `3000,300,2`: one fight, 300 frames, replayed twice | identical both times, all 300 frames |
+| `2500,8,1500,loop`: 1,500 cycles of 8 frames, 12,000 frames of fights and scene changes | 1,498 identical, 0 different, 2 skipped |
+| `2600,1800,1`: one replay of 1,800 frames, across a K.O. and the next fight starting | identical |
+| `600,60,40,loop`: the attract mode, before any credit | 40 of 40 identical |
+| `3000,1,600,loop`: save and replay every single frame for 600 frames | 600 of 600 identical |
+
+### Speed (this PC, one process, 8-frame cycles, 400 of them)
+
+| | |
+|---|---|
+| Save | 1.75 ms (worst 4.1) |
+| Load | 1.27 ms (worst 3.4) |
+| Replay one frame without drawing | 3.89 ms: sound board about 2.0, I/O board about 0.5, the game itself about 1.4 |
+| Play one frame with the software picture | 5.28 ms |
+
+A frame at 60 Hz has 16.7 ms. A frame that rolls back R frames costs about load 1.3 + R x 3.9 +
+the frame itself 5.3 + a save 1.75. That fits for R = 1 (12.2 ms) and just about for R = 2
+(16.2 ms), before the graphics card's share. Rollback netcode usually wants room for 4 to 8.
+
+### What that means for netplay
+
+- The hard unknown is settled: states are exact, cheap, and available on every frame of a fight.
+- **The sound board has to get cheaper to replay, or be left out of replays.** It can't simply be
+  left out: the game reads the sound CPU's replies (`func_800CC434` reads the latch at 0x68000004
+  into gp+0x2C78), so its behaviour feeds back into the game's memory. Options, to be tried in
+  this order:
+  1. Speed up the V53 interpreter. It takes 2 ms for about 540,000 clocks a frame; there is
+     likely a several-fold gain in it.
+  2. Find out how much of the game's logic really depends on those replies. If only the sound
+     driver's own variables do, the board could run outside the rollback.
+- The software picture is not needed in a replay, and neither is the audio output.
+- Saves could use dirty-page tracking later; at 1.75 ms it isn't the bottleneck.
+- Both players need the same ROMs, region, arcade options, save-memory contents and clock. The
+  clock must be fixed or agreed (it follows the PC's by default with a window).
+- Not looked at yet: the networking itself, how players connect, input delay, and what happens
+  on the frames that don't end at the wait point (scene changes: a rollback would have to wait
+  for the next frame that does).
