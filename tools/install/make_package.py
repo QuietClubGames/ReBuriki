@@ -10,7 +10,8 @@ game from the player's own buriki.zip and hng64.zip. Needs the developer toolcha
 (x86_64-w64-mingw32-clang++, llvm-mingw), N64Recomp built in third_party/N64Recomp/build, and Pillow (icon).
 
 setup_art.png (or .jpg / .webp) in the repo root, if present, becomes the picture down the right-hand side of
-the Setup window (files/setup_art.png). It is not kept in the repository (.gitignore): official artwork belongs to
+the Setup window (files/setup_art.png); icon_art.png, if present, becomes the icon of Setup.exe and of the game.
+Neither is kept in the repository (.gitignore): official artwork belongs to
 the game's owners, so whether a public download carries one is a decision for whoever publishes it.
 
 Adapted from ReLayer's tools/install/make_package.py (Copyright (c) 2026 The ReLayer project, MIT License).
@@ -69,10 +70,43 @@ def copy_tree(src, dst, skip_dirs=(), skip_file=lambda n: False):
                 copy(os.path.join(d, f), os.path.join(dst, os.path.relpath(os.path.join(d, f), src)))
 
 
+ICON_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+
+
+def make_logo_icon(src, ico):
+    """The icon from a logo picture (icon_art.* in the repo root): on a black rounded tile, with a thin light
+    outline so the logo's dark parts still show against the black."""
+    from PIL import Image, ImageDraw, ImageFilter
+    big = 1024
+    logo = Image.open(src).convert("RGBA")
+    box = logo.getchannel("A").getbbox()             # trim empty margins
+    if box:
+        logo = logo.crop(box)
+    k = min(big * 0.94 / logo.width, big * 0.94 / logo.height)
+    logo = logo.resize((round(logo.width * k), round(logo.height * k)), Image.LANCZOS)
+    tile = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    ImageDraw.Draw(tile).rounded_rectangle((0, 0, big - 1, big - 1), radius=176, fill=(0, 0, 0, 255))
+    pos = ((big - logo.width) // 2, (big - logo.height) // 2)
+    grown = logo.getchannel("A").filter(ImageFilter.MaxFilter(11)).filter(ImageFilter.GaussianBlur(2))
+    outline = Image.new("RGBA", logo.size, (0xD8, 0xDA, 0xE2, 255))
+    outline.putalpha(grown)
+    tile.alpha_composite(outline, pos)
+    tile.alpha_composite(logo, pos)
+    tile.resize((256, 256), Image.LANCZOS).save(ico, sizes=ICON_SIZES)
+    say(f"icon: {os.path.basename(src)}")
+    return ico
+
+
 def make_icon():
-    """A plain icon in the menu's colours: dark tile, white "B1", gold bar. No game artwork."""
+    """The icon for Setup.exe and the game. icon_art.png (or .jpg / .webp) in the repo root, if present, is
+    used (see make_logo_icon; like setup_art it is not kept in the repository). Otherwise a plain icon in the
+    menu's colours: dark tile, white "B1", gold bar, no game artwork."""
     from PIL import Image, ImageDraw, ImageFont
     ico = os.path.join(HERE, "game.ico")
+    for ext in (".png", ".jpg", ".jpeg", ".webp"):
+        src = os.path.join(ROOT, "icon_art" + ext)
+        if os.path.isfile(src):
+            return make_logo_icon(src, ico)
     n = 256
     im = Image.new("RGBA", (n, n), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
@@ -85,7 +119,8 @@ def make_icon():
     box = d.textbbox((0, 0), "B1", font=font)
     d.text(((n - (box[2] - box[0])) / 2 - box[0], 34 - box[1]), "B1", font=font, fill=(0xF4, 0xF5, 0xF8, 255))
     d.rounded_rectangle((56, 186, 200, 200), radius=7, fill=(0xE8, 0xB6, 0x4C, 255))
-    im.save(ico, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    im.save(ico, sizes=ICON_SIZES)
+    say("icon: plain (no icon_art picture)")
     return ico
 
 

@@ -43,3 +43,4 @@ recomp/soak_script.txt
 dist/
 tools/install/*.ico
 setup_art.*
+icon_art.*
