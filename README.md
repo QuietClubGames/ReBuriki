@@ -28,6 +28,7 @@ An unofficial PC version of SNK's 1999 Hyper Neo Geo 64 arcade fighter.
 | **English or Japanese** | Choose the board's region from the menu. |
 | **Controllers** | Xbox-style controllers for two players, keyboard, and remapping for both. |
 | **Arcade settings** | Free play, difficulty, attack power, timer speed and more from an in-game menu, plus an option to have the hidden fighter Silber from the start. |
+| **Online play** | Two players over the internet or a home network, with rollback so it stays responsive on an ordinary connection. See [Playing online](#playing-online). |
 | **Native** | Not an emulator: the arcade code is recompiled into a Windows program. |
 
 ## Install
@@ -67,6 +68,7 @@ keyboard. The game pauses while the menu is open.
 | **Controls** | Change any key or controller button, stick dead zone, restore defaults |
 | **Game** | Unlock Silber, free play, language / region (applies after a restart) |
 | **Rules** | The arcade operator's settings: difficulty, attack power and timer speed (1 player and versus), continue, replay, blood, move commands on screen, sound in the title demo |
+| **Online** | Host a game, join one by address, input delay, this PC's address, leave |
 | **System** | Resume, the arcade's operator menu, restart, quit |
 
 ## Controls
@@ -91,6 +93,40 @@ The game's own "How to play" screens show the moves.
 | F9 | Enhanced graphics on / off |
 | F2 | The arcade's Test button (operator menu) |
 | 9 | The arcade's Service button |
+
+## Playing online
+
+Two players, each on their own PC with their own copy of ReBuriki. One hosts and is player 1; the other
+joins and is player 2. Each of you plays with your own Player 1 keys or first controller.
+
+1. **Host:** open the menu, go to **Online**, choose **Host a game**. The game restarts and shows a
+   waiting screen with your address.
+2. **Joiner:** on the Online page choose **Address to join**, type the host's address (Enter to start
+   typing, Ctrl+V pastes), then **Join a game**.
+3. The game starts from power on for both of you, with the host's settings: free play, difficulty and
+   the other rules, and whether Silber is unlocked. Put in a coin (unless free play is on), press Start,
+   and the second player pressing Start is the arcade's "here comes a new challenger".
+
+To stop, either player chooses **Leave the online game** (or closes the game). The other is told, and
+both go back to ordinary play.
+
+Things to know:
+
+- **Same network** (two PCs at home): the joiner types the address the host's waiting screen shows.
+- **Over the internet:** the joiner needs the host's public address (the host can search the web for
+  "what is my IP"), and the host's router must forward **UDP port 7600** to the host's PC. A virtual-LAN
+  tool such as Tailscale, ZeroTier or Radmin VPN avoids the router setup: both install it and the joiner
+  types the host's address in that tool.
+- **Windows Firewall** asks the first time you host. Choose Allow.
+- **Both players need the same Language / region** (Game page) and the same game files and version of
+  ReBuriki. If not, the joiner is told so and nothing starts.
+- **Pausing pauses both.** While one player has the menu open, the other sees "Waiting for the other
+  player".
+- **Input delay** (Online page, the host's choice): the number of frames before the game sees a button
+  press. 2 suits most connections. Raise it if the picture often jumps; lower it on a very good
+  connection.
+- With the frame-rate counter on (Display page), the ping is shown next to it.
+- The joiner's own arcade save memory is not touched; the host's is used and kept.
 
 ## FAQ
 

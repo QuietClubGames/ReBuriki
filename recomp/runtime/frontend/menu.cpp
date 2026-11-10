@@ -38,7 +38,7 @@ static float approach(float cur, float target, float dt, float speed) {
 }
 
 // ---------------------------------------------------------------- menu model
-enum { IT_CHOICE, IT_TOGGLE, IT_SLIDER, IT_ACTION, IT_INFO, IT_BINDING };
+enum { IT_CHOICE, IT_TOGGLE, IT_SLIDER, IT_ACTION, IT_INFO, IT_BINDING, IT_TEXT };
 
 struct Item {
     int type;
@@ -55,6 +55,8 @@ struct Item {
     const char* (*info)(void);
     int (*dyn_count)(void);      // choices that depend on the PC (monitors, graphics cards)
     const char* (*dyn_name)(int);
+    const char* (*text_get)(void);   // IT_TEXT: a line the player types
+    void (*text_set)(const char*);
 };
 
 static const UiHost* H;
@@ -89,6 +91,20 @@ static void set_player(int v) { g_ctl_player = v; }
 
 ACCESS(unlock_silber, unlock_silber)
 
+// Online play. While an online game runs, everything that changes how the game itself behaves is the host's
+// and fixed for the session, so those rows are switched off.
+ACCESS(online_delay, online_delay)
+static int online(void) { return H->online_active(); }
+static int offline(void) { return !H->online_active(); }
+static int can_join(void) { return offline() && g_settings.online_address[0]; }
+static const char* get_address(void) { return g_settings.online_address; }
+static void set_address(const char* s) { settings_set_address(&g_settings, s); H->settings_changed(); }
+static const char* info_online(void) { return H->online_status(); }
+static const char* info_address(void) { return H->local_address(); }
+static void act_host(void) { H->online_host(); }
+static void act_join(void) { H->online_join(); }
+static void act_leave(void) { H->online_leave(); }
+
 // The arcade's own operator settings (hw.cpp: hw_game_option_*), shown as rows on the Game and Rules pages.
 // They live in the arcade's save memory, not settings.ini, so the Test menu and these rows always agree.
 // (declared here as in ../hw.h, which this platform-independent file doesn't include)
@@ -99,7 +115,7 @@ bool hw_game_options_ready(void);
 int  hw_game_option_get(int option);
 void hw_game_option_set(int option, int value);
 }
-static int rules_ready(void) { return hw_game_options_ready(); }
+static int rules_ready(void) { return hw_game_options_ready() && offline(); }
 // `first` = the game's number for the first choice (0 for off / on, 1 for easy / light / slow)
 #define GAME_OPTION(name, id, first) \
     static int get_##name(void) { int v = hw_game_option_get(id); return v < first ? 0 : v - first; } \
@@ -121,7 +137,7 @@ static void set_region(int v) {
     H->settings_changed();
     if (v != H->running_region()) ui_toast("The new region applies after a restart");
 }
-static int region_pending(void) { return g_settings.region != H->running_region(); }
+static int region_pending(void) { return g_settings.region != H->running_region() && offline(); }
 
 static const char* const k_mode[] = {"Window", "Borderless full screen", "Exclusive full screen"};
 // window sizes: the list is in fe_window.cpp (widescreen makes each one 16:9 at the same height)
@@ -148,6 +164,7 @@ static const char* const k_difficulty[] = {"Easy", "Normal", "Hard", "Hardest"};
 static const char* const k_attack[] = {"Light", "Normal", "Heavy"};
 static const char* const k_time[] = {"Slow", "Normal", "Quick"};
 static const char* const k_region[] = {"Japan  (Japanese)", "USA  (English)", "World  (English)"};
+static const char* const k_delay[] = {"None", "1 frame", "2 frames", "3 frames", "4 frames", "5 frames", "6 frames"};
 
 static void act_resume(void);
 static void act_operator(void) { H->operator_menu(); }
@@ -171,6 +188,8 @@ static const char* name_gpu(int i) { return i == 0 ? "Automatic (fastest)" : H->
 #define CHOICE(lbl, hlp, g, s, arr, en) {IT_CHOICE, lbl, hlp, g, s, arr, NCH(arr), 0, 0, 0, nullptr, 0, en, nullptr, nullptr, nullptr}
 #define DCHOICE(lbl, hlp, g, s, cnt, nm, en) {IT_CHOICE, lbl, hlp, g, s, nullptr, 0, 0, 0, 0, nullptr, 0, en, nullptr, cnt, nm}
 #define TOGGLE(lbl, hlp, g, s) {IT_TOGGLE, lbl, hlp, g, s, nullptr, 0, 0, 1, 1, nullptr, 0, nullptr, nullptr, nullptr, nullptr}
+#define TOGGLE_EN(lbl, hlp, g, s, en) {IT_TOGGLE, lbl, hlp, g, s, nullptr, 0, 0, 1, 1, nullptr, 0, en, nullptr, nullptr, nullptr}
+#define TEXT(lbl, hlp, g, s, en) {IT_TEXT, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, 0, en, nullptr, nullptr, nullptr, g, s}
 #define SLIDER(lbl, hlp, g, s, lo, hi, st) {IT_SLIDER, lbl, hlp, g, s, nullptr, 0, lo, hi, st, nullptr, 0, nullptr, nullptr, nullptr, nullptr}
 #define ACTION(lbl, hlp, fn, en) {IT_ACTION, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, fn, 0, en, nullptr, nullptr, nullptr}
 #define BIND(lbl, hlp, n) {IT_BINDING, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, n, nullptr, nullptr, nullptr, nullptr}
@@ -208,9 +227,9 @@ static const Item k_controls[] = {
     ACTION("Restore defaults", "Keyboard: arrows Z X C V 1 5 and R F D G A S Q W 2 6. Pads: X Y A B, Start, Back.", act_reset_binds, nullptr),
 };
 static const Item k_game[] = {
-    TOGGLE("Unlock Silber", "The hidden twelfth fighter, Original Karate, at the bottom of the style list. Off: locked until earned, as in the arcade.", get_unlock_silber, set_unlock_silber),
+    TOGGLE_EN("Unlock Silber", "The hidden twelfth fighter, Original Karate, at the bottom of the style list. Off: locked until earned, as in the arcade.", get_unlock_silber, set_unlock_silber, offline),
     CHOICE("Free play", "On: Start alone begins a game, no coin needed. Off: insert a coin first, as in the arcade.", get_free_play, set_free_play, k_offon, rules_ready),
-    CHOICE("Language / region", "The board's BIOS sets the game's language. The game reads it at power on, so it applies after a restart.", get_region, set_region, k_region, nullptr),
+    CHOICE("Language / region", "The board's BIOS sets the game's language. The game reads it at power on, so it applies after a restart.", get_region, set_region, k_region, offline),
     ACTION("Restart now to apply", "Starts the arcade board again with the new region.", act_restart, region_pending),
     INFO("Arcade save memory", "Operator settings and high scores are kept between runs.", info_save),
 };
@@ -228,10 +247,21 @@ static const Item k_rules[] = {
     CHOICE("Move commands on screen", "The arcade's COMMAND DISP. option: the on-screen guide to the controls.", get_command_display, set_command_display, k_offon, rules_ready),
     CHOICE("Sound in the title demo", "Whether the demo fights play sound while nobody is playing.", get_demo_sound, set_demo_sound, k_offon, rules_ready),
 };
+// Online play (netplay.cpp). Hosting and joining restart the game: both players' machines start from power on
+// with the host's settings, which is what keeps them identical.
+static const Item k_online[] = {
+    INFO("Status", "Two players over the internet or a home network, each on their own PC.", info_online),
+    ACTION("Host a game", "You are player 1. The game restarts and waits; the other player chooses Join a game with your address.", act_host, offline),
+    TEXT("Address to join", "The host's address, such as 192.168.1.20. Enter to type it, Ctrl+V to paste.", get_address, set_address, offline),
+    ACTION("Join a game", "You are player 2 and play with the host's game settings. The game restarts and connects to that address.", act_join, can_join),
+    CHOICE("Input delay", "Frames before the game sees a button press, for both players (the host's choice). Raise it if the picture often jumps.", get_online_delay, set_online_delay, k_delay, offline),
+    INFO("This PC's address", "For a player on your network. Over the internet they need your public address, and your router must forward this port.", info_address),
+    ACTION("Leave the online game", "Ends the online game for both players and restarts for ordinary play.", act_leave, online),
+};
 static const Item k_system[] = {
     ACTION("Resume", "Back to the game.", act_resume, nullptr),
-    ACTION("Arcade operator menu", "The cabinet's own test menu (the Test button, F2): settings, input and sound tests.", act_operator, nullptr),
-    ACTION("Restart game", "Starts the arcade board again from power on.", act_restart, nullptr),
+    ACTION("Arcade operator menu", "The cabinet's own test menu (the Test button, F2): settings, input and sound tests.", act_operator, offline),
+    ACTION("Restart game", "Starts the arcade board again from power on.", act_restart, offline),
     ACTION("Quit to desktop", "Settings and the arcade's save memory are saved automatically.", act_quit, nullptr),
 };
 
@@ -242,9 +272,10 @@ static const Section k_sections[] = {
     {"CONTROLS", k_controls, NCH(k_controls)},
     {"GAME", k_game, NCH(k_game)},
     {"RULES", k_rules, NCH(k_rules)},
+    {"ONLINE", k_online, NCH(k_online)},
     {"SYSTEM", k_system, NCH(k_system)},
 };
-#define NSECT 6
+#define NSECT 7
 #define MAXROWS 16
 
 static int choice_count(const Item* it) { return it->dyn_count ? it->dyn_count() : it->nchoices; }
@@ -268,6 +299,13 @@ static float g_panel_h;                   // animated panel height
 struct Toast { char text[96]; float age; };
 static Toast g_toasts[4];
 
+// a line being typed (IT_TEXT)
+static const Item* g_edit;
+static char g_edit_buf[64];
+// message box and notice (ui_dialog, ui_notice)
+static int g_dlg;
+static char g_dlg_title[64], g_dlg_body[640], g_dlg_key[16], g_dlg_label[64], g_notice[96];
+
 void ui_init(const UiHost* host) { H = host; }
 
 static int item_enabled(const Item* it) {
@@ -286,10 +324,31 @@ static void select_valid(int dir) {
     g_row[g_sect] = r < 0 ? 0 : r >= s->n ? s->n - 1 : r;
 }
 
+int ui_text_editing(void) { return g_open && g_edit != nullptr; }
+void ui_text_input(int ch) {
+    if (!g_edit) return;
+    size_t n = strlen(g_edit_buf);
+    if (ch == 8) { if (n) g_edit_buf[n - 1] = 0; }
+    else if (ch == 13) { g_edit->text_set(g_edit_buf); g_edit = nullptr; g_flash = 1; }
+    else if (ch == 27) g_edit = nullptr;
+    else if (ch > 32 && ch < 127 && n + 2 < sizeof g_edit_buf) { g_edit_buf[n] = (char)ch; g_edit_buf[n + 1] = 0; }
+}
+
+void ui_dialog(const char* title, const char* body, const char* key, const char* label) {
+    g_dlg = title != nullptr;
+    if (!title) return;
+    snprintf(g_dlg_title, sizeof g_dlg_title, "%s", title);
+    snprintf(g_dlg_body, sizeof g_dlg_body, "%s", body ? body : "");
+    snprintf(g_dlg_key, sizeof g_dlg_key, "%s", key ? key : "");
+    snprintf(g_dlg_label, sizeof g_dlg_label, "%s", label ? label : "");
+}
+void ui_notice(const char* text) { snprintf(g_notice, sizeof g_notice, "%s", text ? text : ""); }
+
 void ui_menu_toggle(int device) {
     g_device = device;
     g_open = !g_open;
     g_quit_armed = 0;
+    g_edit = nullptr;
     if (g_open) { select_valid(1); uip_art_next(); }
 }
 void ui_menu_set_page(int page) {
@@ -325,6 +384,7 @@ void ui_key(int key, int device) {
     g_device = device;
     if (!g_open) return;
     if (H->capturing() >= 0) return;               // waiting for a key or button press to remap
+    if (g_edit) return;                            // typing: the platform sends characters to ui_text_input
     const Section* s = &k_sections[g_sect];
     const Item* it = &s->items[g_row[g_sect]];
     if (key != UI_OK) g_quit_armed = 0;
@@ -338,6 +398,7 @@ void ui_key(int key, int device) {
     case UI_OK:
         if (it->type == IT_ACTION) it->action();
         else if (it->type == IT_BINDING) H->start_capture(g_ctl_player * 6 + it->binding);
+        else if (it->type == IT_TEXT) { g_edit = it; snprintf(g_edit_buf, sizeof g_edit_buf, "%s", it->text_get()); }
         else if (it->type == IT_TOGGLE || it->type == IT_CHOICE) change(it, 1);
         break;
     case UI_BACK:
@@ -354,6 +415,7 @@ void ui_update(float dt) {
     if (g_t > 1) g_t = 1;
     g_flash = approach(g_flash, 0, dt, 6);
     g_time += dt;
+    if (!g_open) g_edit = nullptr;
     for (auto& t : g_toasts) t.age += dt;
     for (int s = 0; s < NSECT; s++)
         for (int r = 0; r < k_sections[s].n; r++) {
@@ -443,7 +505,7 @@ static void draw_menu(float vw, float vh) {
     uip_text(px + 58, py + 38, UI_FONT_TITLE, fade(COL_TEXT, a), "BURIKI ONE");
     uip_rect(px + 60, py + 100, 70, 4, 2, fade(COL_GOLD, a), fade(COL_GOLD, a), 0, 0, 0);
     {
-        const char* p = "PAUSED";
+        const char* p = online() ? "PAUSED FOR BOTH PLAYERS" : "PAUSED";
         float tw = uip_text_w(UI_FONT_SMALL, p) + 28;
         uip_rect(px + W - 58 - tw, py + 48, tw, 34, 17, fade(0xFFFFFF14u, a), fade(0xFFFFFF0Cu, a), 1, fade(0xFFFFFF18u, a), 0);
         text_c(px + W - 58 - tw / 2, vcenter(py + 48, 34, UI_FONT_SMALL), UI_FONT_SMALL, fade(COL_TEXT_DIM, a), p);
@@ -544,6 +606,20 @@ static void draw_menu(float vw, float vh) {
             }
             break;
         }
+        case IT_TEXT: {
+            // a box holding the text; gold with a blinking caret while it is being typed
+            const bool editing = g_edit == it;
+            const char* v = editing ? g_edit_buf : it->text_get();
+            const char* shown = *v ? v : editing ? "" : "Not set";
+            float tw = uip_text_w(UI_FONT_VALUE, shown), bw = tw + 40 < 300 ? 300 : tw + 40, bh = 36;
+            uip_rect(rx - bw, cy - bh / 2, bw, bh, 9, fade(editing ? 0xE8B64C2Au : 0xFFFFFF10u, a), fade(editing ? 0xE8B64C1Au : 0xFFFFFF0Au, a),
+                     1, fade(editing ? COL_GOLD : 0xFFFFFF22u, a), 0);
+            uint32_t tc = !en ? COL_TEXT_OFF : !*v ? COL_TEXT_OFF : sel ? mix(COL_TEXT, COL_GOLD, g_flash * 0.8f) : COL_TEXT_DIM;
+            uip_text(rx - bw + 18, vcenter(cy - bh / 2, bh, UI_FONT_VALUE), UI_FONT_VALUE, fade(tc, a), shown);
+            if (editing && fmodf(g_time, 1.0f) < 0.55f)
+                uip_rect(rx - bw + 20 + tw, cy - 11, 2, 22, 1, fade(COL_GOLD, a), fade(COL_GOLD, a), 0, 0, 0);
+            break;
+        }
         case IT_ACTION:
             text_r(rx, vcenter(y, row_h, UI_FONT_VALUE), UI_FONT_VALUE, fade(sel ? COL_GOLD : en ? 0x6A7080FFu : COL_TEXT_OFF, a), "\xE2\x80\xBA");
             break;
@@ -574,7 +650,8 @@ static void draw_menu(float vw, float vh) {
     // help line for the selected row
     float fy = py + Hh - 118;
     uip_rect(px + 40, fy, W - 80, 1, 0, fade(COL_LINE, a), fade(COL_LINE, a), 0, 0, 0);
-    uip_text(px + 62, fy + 18, UI_FONT_SMALL, fade(COL_TEXT_DIM, a), s->items[g_row[g_sect]].help);
+    uip_text(px + 62, fy + 18, UI_FONT_SMALL, fade(COL_TEXT_DIM, a),
+             g_edit ? "Type the address, then press Enter. Ctrl+V pastes. Esc cancels." : s->items[g_row[g_sect]].help);
 
     // button hints
     float hx = px + 62, hy = py + Hh - 42;
@@ -586,6 +663,53 @@ static void draw_menu(float vw, float vh) {
     g_sel_y = approach(g_sel_y, target_y, 1.0f / 60, 22);
     g_tab_x = approach(g_tab_x, tab_x[g_sect], 1.0f / 60, 20);
     g_tab_w = approach(g_tab_w, tab_w[g_sect], 1.0f / 60, 20);
+}
+
+// A message box in the middle of the screen, over everything.
+static void draw_dialog(float vw, float vh) {
+    const float W = 980, line_h = 40;
+    int lines = 1;
+    for (const char* c = g_dlg_body; *c; c++) lines += *c == '\n';
+    const float Hh = 150 + (float)lines * line_h + 96;
+    const float px = (vw - W) / 2, py = (vh - Hh) / 2;
+    uip_rect(0, 0, vw, vh, 0, 0x00000070u, 0x00000070u, 0, 0, 0);
+    uip_rect(px - 10, py + 6, W + 20, Hh + 20, 30, 0x00000090u, 0x00000090u, 0, 0, 34);
+    uip_rect(px, py, W, Hh, 20, COL_PANEL_TOP, COL_PANEL_BOT, 1.5f, 0xFFFFFF1Cu, 0);
+    uip_rect(px + 40, py, W - 80, 2, 1, 0xE8B64C70u, 0xE8B64C70u, 0, 0, 0);
+    uip_text(px + 58, py + 44, UI_FONT_HEAD, COL_TEXT, g_dlg_title);
+    // three dots that pulse in turn while something is going on (a wait the player can cancel)
+    for (int i = 0; i < 3 && !strcmp(g_dlg_key, "Esc"); i++) {
+        float k = 0.5f + 0.5f * sinf(g_time * 4.0f - (float)i * 0.9f);
+        uip_rect(px + W - 110 + (float)i * 20, py + 58, 10, 10, 5, fade(COL_GOLD, 0.25f + 0.75f * k), fade(COL_GOLD, 0.25f + 0.75f * k), 0, 0, 0);
+    }
+    uip_rect(px + 60, py + 96, 70, 4, 2, COL_GOLD, COL_GOLD, 0, 0, 0);
+    float y = py + 132;
+    char line[200];
+    for (const char* c = g_dlg_body; ; ) {
+        const char* e = strchr(c, '\n');
+        size_t n = e ? (size_t)(e - c) : strlen(c);
+        if (n >= sizeof line) n = sizeof line - 1;
+        memcpy(line, c, n);
+        line[n] = 0;
+        uip_text(px + 60, y, UI_FONT_BODY, 0xC9CDD6FFu, line);
+        y += line_h;
+        if (!e) break;
+        c = e + 1;
+    }
+    if (g_dlg_key[0]) {
+        float fy = py + Hh - 84;
+        uip_rect(px + 40, fy, W - 80, 1, 0, COL_LINE, COL_LINE, 0, 0, 0);
+        float kw = key_glyph(px + 62, fy + 44, g_dlg_key, 1);
+        uip_text(px + 62 + kw + 12, vcenter(fy + 28, 32, UI_FONT_SMALL), UI_FONT_SMALL, COL_TEXT_DIM, g_dlg_label);
+    }
+}
+
+static void draw_notice(float vw) {
+    float w = uip_text_w(UI_FONT_SMALL, g_notice) + 78, h = 46, x = (vw - w) / 2, y = 34;
+    float k = 0.5f + 0.5f * sinf(g_time * 4.0f);
+    uip_rect(x, y, w, h, 23, 0x1B1D27EEu, 0x12131AEEu, 1, 0xFFFFFF1Cu, 0);
+    uip_rect(x + 22, y + h / 2 - 5, 10, 10, 5, fade(COL_GOLD, 0.3f + 0.7f * k), fade(COL_GOLD, 0.3f + 0.7f * k), 0, 0, 0);
+    uip_text(x + 46, vcenter(y, h, UI_FONT_SMALL), UI_FONT_SMALL, COL_TEXT, g_notice);
 }
 
 static void draw_toasts(float vw, float vh) {
@@ -605,12 +729,16 @@ static void draw_toasts(float vw, float vh) {
 
 void ui_draw(float vw, float vh, float fps) {
     if (g_settings.show_fps) {
-        char b[32];
-        snprintf(b, sizeof b, "%.0f FPS", fps);
+        char b[48];
+        const int ping = H && H->online_active() ? H->online_ping() : -1;
+        if (ping >= 0) snprintf(b, sizeof b, "%.0f FPS   %d ms", fps, ping);
+        else snprintf(b, sizeof b, "%.0f FPS", fps);
         float w = uip_text_w(UI_FONT_SMALL, b) + 28;
         uip_rect(vw - 30 - w, 26, w, 36, 18, 0x101118B0u, 0x101118B0u, 1, 0xFFFFFF18u, 0);
         text_c(vw - 30 - w / 2, vcenter(26, 36, UI_FONT_SMALL), UI_FONT_SMALL, fps >= 58.5f ? 0x9BE39FFFu : COL_GOLD, b);
     }
+    if (g_notice[0] && !g_dlg) draw_notice(vw);
     if (ui_menu_visible()) draw_menu(vw, vh);
+    if (g_dlg) draw_dialog(vw, vh);
     draw_toasts(vw, vh);
 }

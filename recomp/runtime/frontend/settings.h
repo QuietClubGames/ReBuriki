@@ -27,6 +27,9 @@ struct Settings {
     int mute;
     int unlock_silber;    // 1 = the hidden twelfth fighter is selectable from the start (hw_set_unlock_silber)
     int region;           // REGION_*: which BIOS the board boots with (the game's language); applies after restart
+    int online_delay;     // online play: frames between pressing a button and the game seeing it (the host's is used)
+    int online_port;      // online play: the UDP port a hosted game listens on
+    char online_address[64];   // online play: the address last typed for Join (letters, digits, . : -)
 };
 
 extern Settings g_settings;
@@ -37,3 +40,4 @@ int  settings_save(const Settings* s, const char* path);
 int  settings_set(Settings* s, const char* key_eq_value);   // "key=value" (command line --set); 0 if unknown
 int  settings_quality_scale(int quality);              // render scale for a preset, 0 = auto
 const char* settings_region_bios(int region);          // BIOS file name in hng64/
+void settings_set_address(Settings* s, const char* text);   // online_address, keeping only what an address can hold

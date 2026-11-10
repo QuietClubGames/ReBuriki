@@ -880,10 +880,10 @@ tested over 12,000 frames of fights and scene changes, not proven for every scre
   from the first pass. Costs the old 2.3 ms a frame, but only on those frames.
 - Saves are now the larger part (1.05 ms each, 19.7 MB). Dirty-page tracking would cut that.
 
-## Online play: the rollback core and the link (2026-11-10): working in tests, not in the menu yet
+## Online play: rollback, a direct link, and the Online page (2026-11-10): done; untested between two PCs
 
-Two players, a direct UDP link, rollback. `netplay.cpp` (the session), `pagestate.cpp` (cheap
-states), hooks in `hw.cpp`, `input.cpp`, `sound.cpp`. Started from the command line for now:
+Two players, a direct UDP link, rollback. Menu: Online. `netplay.cpp` (the session), `pagestate.cpp` (cheap
+states), hooks in `hw.cpp`, `input.cpp`, `sound.cpp`. The command-line form:
 
     ReBuriki.exe --netplay-host 7600 [--netplay-delay 2]
     ReBuriki.exe --netplay-join ADDRESS[:PORT]
@@ -982,15 +982,29 @@ every comparison on the way matched. The scripts put in a coin each and play a t
 | 3,600 frames in two real windows (host's save memory, live clock), 40 ms +15, 3% loss | 243 / 252 | 4 | pass, 59 of 59; longest rollback 4.6 ms |
 | 3,200 frames with the installer-built exe, 60 ms +20, 5% loss | 194 / 199 | 8 | pass, 53 of 53 |
 
+### The Online page and the screens (2026-11-10)
+
+- Menu page ONLINE (`menu.cpp`): Status, Host a game, Address to join (a typed line, new item type
+  `IT_TEXT`; letters, digits, `.`, `:` and `-`; Ctrl+V pastes), Join a game, Input delay, This PC's
+  address, Leave the online game. `settings.ini` gains `online_delay`, `online_port` (7600, no menu
+  row) and `online_address`.
+- Hosting, joining and leaving restart the program with the online options changed
+  (`fe_relaunch`): the same mechanism as Restart game, since both machines must start from power on.
+- Screens (`ui_dialog`, `ui_notice`; `fe_dialog_frame`, `fe_stall_frame` in `fe_window.cpp`):
+  a waiting screen for the host with its address (Esc cancels), a joining screen, "could not
+  start" with the reason, "Waiting for the other player" at the top of the picture when the game has
+  waited more than 0.4 s (the pause menu still works then), and "The online game has ended" when the
+  other player leaves or nothing has arrived for 10 s. Each ends by going back to ordinary play.
+- While online the rows that change how the game behaves are switched off (Unlock Silber, free play,
+  region, the Rules page, the operator menu, Restart game), and `hw_game_option_set` does nothing.
+  The pause badge reads "PAUSED FOR BOTH PLAYERS". The frame-rate counter also shows the ping.
+- Tested with simulated key presses (`--test-keys`, `--shot-every` now also saves `menu_`, `dialog_`
+  and `stall_` pictures): menu to Host to a joined game; the joiner leaving; the joiner killed
+  (notice, then "connection lost", then back to ordinary play); typing an address and a join with
+  no answer; Esc on the waiting screen.
+
 ### Not done yet
 
-- **No menu.** Hosting and joining are command-line options. Wanted: an Online page (host /
-  join with an address box / delay), a small status line (ping, rollbacks, "waiting for the
-  other player"), and the Game and Rules pages locked while online.
-- **Leaving.** When the other player leaves or the link drops for 10 s the game stops with a
-  message box. It should go back to ordinary play or the menu.
-- **The pause menu** freezes this copy, and the other one waits (a keep-alive stops it timing
-  out: `netplay_idle`). Fine between friends; needs a notice on the waiting side.
 - **The internet.** Direct UDP needs the host's port (7600) reachable: a forwarded port on
   their router, or a VPN-style tool. No hole punching, no lobby. Windows asks once whether to
   allow the game through the firewall.

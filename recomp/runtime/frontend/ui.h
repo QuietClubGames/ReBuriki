@@ -28,7 +28,7 @@ void  uip_art(float x, float y, float w, float h, float radius, float alpha);
 // ---- input ----
 enum { UI_UP, UI_DOWN, UI_LEFT, UI_RIGHT, UI_OK, UI_BACK, UI_PREV_TAB, UI_NEXT_TAB, UI_CLOSE };
 enum { UI_DEV_KEYBOARD, UI_DEV_PAD };
-enum { UI_PAGE_DISPLAY, UI_PAGE_AUDIO, UI_PAGE_CONTROLS, UI_PAGE_GAME, UI_PAGE_RULES, UI_PAGE_SYSTEM, UI_PAGE_COUNT };
+enum { UI_PAGE_DISPLAY, UI_PAGE_AUDIO, UI_PAGE_CONTROLS, UI_PAGE_GAME, UI_PAGE_RULES, UI_PAGE_ONLINE, UI_PAGE_SYSTEM, UI_PAGE_COUNT };
 
 // ---- services the menu needs from the platform ----
 // Remappable actions: player * 6 + {0-3 buttons 1-4, 4 start, 5 coin}.
@@ -51,6 +51,14 @@ struct UiHost {
     const char* (*gpu_name)(int index);
     int         (*running_region)(void);            // the region the board booted with
     const char* (*save_memory_info)(void);          // where the arcade's save memory goes
+    // online play (the Online page)
+    int         (*online_active)(void);             // an online game is running
+    const char* (*online_status)(void);             // "Not connected", or who you are, the ping, the rollbacks
+    const char* (*local_address)(void);             // this PC's address on its network, and the port
+    void        (*online_host)(void);               // restart as the host of an online game
+    void        (*online_join)(void);               // restart and join the game at g_settings.online_address
+    void        (*online_leave)(void);              // restart for ordinary play
+    int         (*online_ping)(void);               // ms, or -1
 };
 
 void ui_init(const UiHost* host);
@@ -60,6 +68,15 @@ int  ui_menu_visible(void);      // drawn (including the closing animation)
 int  ui_menu_wants_pause(void);  // the game should stay paused
 void ui_key(int key, int device);
 void ui_toast(const char* msg);
+// A line of text being typed in the menu (the address on the Online page). While ui_text_editing(), the
+// platform sends characters here instead of menu keys: printable ASCII, 8 = backspace, 13 = accept, 27 = cancel.
+int  ui_text_editing(void);
+void ui_text_input(int ch);
+// A message box over everything (online play: waiting for the other player, the game has ended...). The body
+// may have several lines. key / label: the hint at the bottom ("Esc", "Cancel"). title = NULL takes it away.
+void ui_dialog(const char* title, const char* body, const char* key, const char* label);
+// A small notice at the top of the picture until it is set to NULL ("Waiting for the other player").
+void ui_notice(const char* text);
 void ui_update(float dt);
 void ui_draw(float vw, float vh, float fps);
 float ui_backdrop(void);         // 0..1: how much to darken and blur the game behind the menu

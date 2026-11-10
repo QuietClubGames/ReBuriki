@@ -16,6 +16,8 @@ void settings_defaults(Settings* s) {
     s->volume = 100;
     s->unlock_silber = 1;          // like ReLayer's "unlock all characters": on unless the player wants to earn him
     s->region = REGION_USA;        // English by default; Japanese stays selectable
+    s->online_delay = 2;
+    s->online_port = 7600;
 }
 
 int settings_quality_scale(int q) {
@@ -47,7 +49,21 @@ static const struct { const char* key; size_t ofs; int lo, hi; } k_fields[] = {
     {"mute", offsetof(Settings, mute), 0, 1},
     {"unlock_silber", offsetof(Settings, unlock_silber), 0, 1},
     {"region", offsetof(Settings, region), 0, REGION_COUNT - 1},
+    {"online_delay", offsetof(Settings, online_delay), 0, 6},
+    {"online_port", offsetof(Settings, online_port), 1024, 65535},
 };
+
+// The one setting that is text: an address for online play. Only the characters an address can have are kept.
+static void set_address(Settings* s, const char* v) {
+    size_t n = 0;
+    for (; *v && n + 1 < sizeof s->online_address; v++) {
+        const char c = *v;
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == ':' || c == '-') s->online_address[n++] = c;
+        else if (c >= 'A' && c <= 'Z') s->online_address[n++] = (char)(c + 32);
+    }
+    s->online_address[n] = 0;
+}
+void settings_set_address(Settings* s, const char* v) { set_address(s, v); }
 
 static int set_field(Settings* s, const char* key, int v) {
     for (auto& f : k_fields)
@@ -63,6 +79,8 @@ static int set_field(Settings* s, const char* key, int v) {
 int settings_set(Settings* s, const char* kv) {
     char key[64];
     int v;
+    char text[128];
+    if (sscanf(kv, " %63[^= ] = %127s", key, text) == 2 && !strcmp(key, "online_address")) { set_address(s, text); return 1; }
     if (sscanf(kv, " %63[^= ] = %d", key, &v) != 2) return 0;
     return set_field(s, key, v);
 }
@@ -85,6 +103,7 @@ int settings_save(const Settings* s, const char* path) {
     fprintf(f, "# Buriki One settings (written by the in-game menu: Tab / Esc, or Back + Start on a pad)\n"
                "# region: 0 Japan (Japanese), 1 USA (English), 2 World (English)\n");
     for (auto& k : k_fields) fprintf(f, "%s = %d\n", k.key, *(const int*)((const char*)s + k.ofs));
+    if (s->online_address[0]) fprintf(f, "online_address = %s\n", s->online_address);
     fclose(f);
     return 1;
 }

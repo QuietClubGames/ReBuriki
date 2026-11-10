@@ -37,8 +37,11 @@ int64_t netplay_clock(uint32_t frame);
 // While this copy stands still on purpose (its pause menu is open): keeps telling the other copy it is
 // there, so that one waits instead of deciding the connection is lost.
 void netplay_idle(void);
-// A line for the log / the screen: ping, rollbacks. Empty when not playing online.
+// For the Online page: who this player is, the ping, the rollbacks ("" when not playing online); the ping
+// in ms (-1 unknown); and this PC's address on its own network.
 const char* netplay_status(void);
+int netplay_ping(void);
+const char* netplay_local_address(void);
 
 // sound.cpp: the game has sent the sound board a command (the latch's contents when the command interrupt
 // is raised). During a rollback the board is not given it; see "Sound" in netplay.cpp.

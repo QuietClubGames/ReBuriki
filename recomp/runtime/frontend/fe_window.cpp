@@ -374,7 +374,7 @@ static void menu_test_tick() {
         snprintf(page, sizeof page, "%s", g_opt.menu_test);
         int dev = UI_DEV_KEYBOARD;
         if (char* c = strchr(page, ':')) { *c = 0; if (!strcmp(c + 1, "pad")) dev = UI_DEV_PAD; }
-        static const char* names[] = {"display", "audio", "controls", "game", "rules", "system"};
+        static const char* names[] = {"display", "audio", "controls", "game", "rules", "online", "system"};
         int idx = -1;
         for (int i = 0; i < UI_PAGE_COUNT; i++) if (!strcmp(page, names[i])) idx = i;
         bool capture = !strcmp(page, "capture");
@@ -475,10 +475,87 @@ static void one_frame(const uint32_t* rgb, int w, int h) {
         static char shot[MAX_PATH];
         snprintf(shot, sizeof shot, "%s/shot_%05u.bmp", g_opt.shot_dir ? g_opt.shot_dir : ".", hw_frame_number());
         d3d_request_backbuffer_save(shot);
+    } else if (g_opt.shot_every && g_use_d3d && ui_menu_wants_pause() && g_shown % g_opt.shot_every == 0) {
+        static char shot[MAX_PATH];       // the menu holds the game on one frame: number these by displayed frame
+        snprintf(shot, sizeof shot, "%s/menu_%05u.bmp", g_opt.shot_dir ? g_opt.shot_dir : ".", g_shown);
+        d3d_request_backbuffer_save(shot);
     }
 }
 
+// ---------------------------------------------------------------- online play's screens
+static const uint32_t* g_last_rgb;      // the picture most recently shown (video.cpp's buffer, which stays put)
+static int g_last_w, g_last_h;
+static bool g_stalled;
+
+int fe_dialog_frame(const char* title, const char* body, const char* key, const char* label) {
+    g_activity++;
+    if (!g_wnd) { Sleep(2); return 0; }
+    static uint32_t black[512 * 448];
+    const uint32_t* rgb = g_last_rgb ? g_last_rgb : black;
+    const int w = g_last_rgb ? g_last_w : 512, h = g_last_rgb ? g_last_h : 448;
+    g_shown++;
+    test_keys_tick();
+    MSG msg;
+    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageA(&msg); }
+    if (g_closing) fe_quit();
+    static LARGE_INTEGER prev;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    float dt = prev.QuadPart ? (float)((double)(now.QuadPart - prev.QuadPart) / (double)g_freq.QuadPart) : 1.0f / 60;
+    if (dt > 0.1f) dt = 0.1f;
+    prev = now;
+    int result = 0;
+    for (int k; (k = video_pop_key()) != 0;) {
+        if (k & KEY_REPEAT) continue;
+        const int vk = k & 0xFFFF;
+        if (vk == VK_RETURN || vk == VK_SPACE) result = 1;
+        else if (vk == VK_ESCAPE) result = 2;
+    }
+    pad_poll();
+    static uint32_t prev_held = ~0u;
+    const uint32_t held = pad_held_all(), pressed = held & ~prev_held;
+    prev_held = held;
+    if (pressed & (1u << SRC_A)) result = 1;
+    if (pressed & (1u << SRC_B)) result = 2;
+    ui_dialog(title, body, key, label);
+    ui_update(dt);
+    g_blit_dim = g_blit_blur = 0.75f;
+    present(rgb, w, h);
+    wait_frame();
+    if (g_opt.shot_every && g_use_d3d && g_shown % g_opt.shot_every == 0) {     // --shot-every (tests)
+        static char shot[MAX_PATH];
+        snprintf(shot, sizeof shot, "%s/dialog_%05u.bmp", g_opt.shot_dir ? g_opt.shot_dir : ".", g_shown);
+        d3d_request_backbuffer_save(shot);
+    }
+    if (result) { ui_dialog(nullptr, nullptr, nullptr, nullptr); g_blit_dim = g_blit_blur = 0; }
+    return result;
+}
+
+void fe_dialog_off(void) { ui_dialog(nullptr, nullptr, nullptr, nullptr); g_blit_dim = g_blit_blur = 0; }
+
+void fe_stall_frame(const char* notice) {
+    if (!g_wnd || !g_last_rgb) { fe_wait_pump(); Sleep(1); return; }
+    if (!g_stalled) { g_stalled = true; audio_out_pause(true); }
+    ui_notice(notice);
+    one_frame(g_last_rgb, g_last_w, g_last_h);
+    if (g_opt.shot_every && g_use_d3d && g_shown % g_opt.shot_every == 0) {     // --shot-every (tests)
+        static char shot[MAX_PATH];
+        snprintf(shot, sizeof shot, "%s/stall_%05u.bmp", g_opt.shot_dir ? g_opt.shot_dir : ".", g_shown);
+        d3d_request_backbuffer_save(shot);
+    }
+}
+
+void fe_stall_end(void) {
+    if (!g_stalled) return;
+    g_stalled = false;
+    ui_notice(nullptr);
+    if (!ui_menu_wants_pause()) audio_out_pause(false);
+}
+
+void fe_toast(const char* text) { ui_toast(text); }
+
 void fe_present_frame(const uint32_t* rgb, int w, int h) {
+    g_last_rgb = rgb; g_last_w = w; g_last_h = h;
     one_frame(rgb, w, h);
     fe_nvram_tick();
     if (ui_menu_wants_pause()) {

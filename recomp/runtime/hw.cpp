@@ -418,6 +418,7 @@ int hw_game_option_get(int option) {
 }
 
 void hw_game_option_set(int option, int value) {
+    if (netplay_active()) return;      // online, the game's options are the host's and fixed for the session
     if (option < 0 || option >= GOPT_COUNT || !hw_game_options_ready()) return;
     const GameOption& o = k_game_options[option];
     if (value < o.lo) value = o.lo;

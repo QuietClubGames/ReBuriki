@@ -209,10 +209,15 @@ void finish() {
     bye();
 }
 
+// The session is over (the other player left, or the link dropped). With a window: say so, and go back to
+// ordinary play, which means starting the game again. Without one (tests): stop with the message.
 [[noreturn]] void stop(const char* why) {
     fprintf(stderr, "[netplay] %s (frame %u)\n", why, hw_frame_number());
     finish();
-    hw_fatal("Online play ended: %s.", why);
+    if (g_video_cfg.headless) hw_fatal("Online play ended: %s", why);
+    fe_stall_end();
+    while (!fe_dialog_frame("THE ONLINE GAME HAS ENDED", why, "Enter", "Back to ordinary play")) {}
+    fe_relaunch("");
 }
 
 void compare_checks() {
@@ -433,10 +438,36 @@ void netplay_idle(void) {
 }
 
 const char* netplay_status(void) {
-    static char s[96];
+    static char s[128];
     if (!n.active) return "";
-    snprintf(s, sizeof s, "ping %.0f ms, %u rollbacks", n.rtt < 0 ? 0.0 : n.rtt, n.rollbacks);
+    if (n.rtt < 0) snprintf(s, sizeof s, "Connected: you are player %d", n.host ? 1 : 2);
+    else snprintf(s, sizeof s, "Player %d    ping %.0f ms    %u rollbacks", n.host ? 1 : 2, n.rtt, n.rollbacks);
     return s;
+}
+
+int netplay_ping(void) { return n.active && n.rtt >= 0 ? (int)(n.rtt + 0.5) : -1; }
+
+// This PC's address on its own network: the one a packet to the internet would leave from. (Asking Windows
+// which that is sends nothing.)
+const char* netplay_local_address(void) {
+    static char ip[64] = "unknown";
+    static double checked = -1e9;
+    if (now_ms() - checked < 5000) return ip;
+    checked = now_ms();
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa)) return ip;
+    const SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s != INVALID_SOCKET) {
+        sockaddr_in to = {}, me = {};
+        to.sin_family = AF_INET; to.sin_port = htons(53);
+        inet_pton(AF_INET, "192.0.2.1", &to.sin_addr);
+        int len = sizeof me;
+        if (!connect(s, (sockaddr*)&to, sizeof to) && !getsockname(s, (sockaddr*)&me, &len) && me.sin_addr.s_addr)
+            inet_ntop(AF_INET, &me.sin_addr, ip, sizeof ip);
+        closesocket(s);
+    }
+    WSACleanup();
+    return ip;
 }
 
 bool netplay_start(const NetplayOptions& opt, const char** error) {
@@ -453,9 +484,9 @@ bool netplay_start(const NetplayOptions& opt, const char** error) {
         }
     }
     WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa)) return failed(fail("Windows networking could not be started"));
+    if (WSAStartup(MAKEWORD(2, 2), &wsa)) return failed(fail("Windows networking could not be started."));
     g_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (g_sock == INVALID_SOCKET) return failed(fail("could not open a network socket"));
+    if (g_sock == INVALID_SOCKET) return failed(fail("A network connection could not be opened."));
     u_long nonblocking = 1;
     ioctlsocket(g_sock, FIONBIO, &nonblocking);
 
@@ -469,10 +500,16 @@ bool netplay_start(const NetplayOptions& opt, const char** error) {
         sockaddr_in me = {};
         me.sin_family = AF_INET; me.sin_addr.s_addr = htonl(INADDR_ANY); me.sin_port = htons((u_short)opt.port);
         if (bind(g_sock, (sockaddr*)&me, sizeof me)) {
-            snprintf(reason, sizeof reason, "port %d is in use by another program", opt.port);
+            snprintf(reason, sizeof reason, "Port %d is already in use on this PC,\nperhaps by another copy of the game.", opt.port);
             return failed(fail(reason));
         }
         fprintf(stderr, "[netplay] hosting on UDP port %d, waiting for the other player\n", opt.port);
+        static char lobby[400];
+        snprintf(lobby, sizeof lobby,
+                 "Waiting for the other player to join.\n \n"
+                 "On the same network, they join:    %s\n"
+                 "Over the internet they need your public address, and your\n"
+                 "router must forward UDP port %d to this PC.", netplay_local_address(), opt.port);
         Config cfg = make<Config>(T_CONFIG);
         cfg.ok = 1; cfg.delay = (uint8_t)std::clamp(opt.delay, 0, 15); cfg.unlock = opt.unlock_silber; cfg.chunks = NV_CHUNKS;
         const time_t now = time(nullptr);
@@ -491,9 +528,9 @@ bool netplay_start(const NetplayOptions& opt, const char** error) {
                     memcpy(&he, buf, sizeof he);
                     Config no = make<Config>(T_CONFIG);
                     if (he.proto != PROTO || memcmp(he.build, BUILD, sizeof BUILD))
-                        snprintf(no.reason, sizeof no.reason, "the two players have different versions of ReBuriki");
+                        snprintf(no.reason, sizeof no.reason, "The two players have different versions of ReBuriki.");
                     else if (he.content != content)
-                        snprintf(no.reason, sizeof no.reason, "the two players have different game files or regions");
+                        snprintf(no.reason, sizeof no.reason, "The two players' games differ: different game files,\nor a different Language / region (Game page).");
                     if (no.reason[0]) {
                         fprintf(stderr, "[netplay] turned a player away: %s\n", no.reason);
                         sendto(g_sock, (const char*)&no, sizeof no, 0, (sockaddr*)&from, sizeof from);
@@ -515,9 +552,8 @@ bool netplay_start(const NetplayOptions& opt, const char** error) {
                     raw_send(&c, sizeof c);
                 }
             }
-            if (g_video_cfg.headless && now_ms() - t0 > 60000) return failed(fail("nobody joined"));
-            fe_wait_pump();
-            Sleep(2);
+            if (g_video_cfg.headless && now_ms() - t0 > 60000) return failed(fail("Nobody joined."));
+            if (fe_dialog_frame("HOSTING AN ONLINE GAME", lobby, "Esc", "Cancel") == 2) return failed(fail(""));
         }
         Hdr start = {MAGIC, T_START};
         for (int i = 0; i < 3; i++) raw_send(&start, sizeof start);
@@ -530,13 +566,15 @@ bool netplay_start(const NetplayOptions& opt, const char** error) {
         addrinfo hints = {}, *res = nullptr;
         hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
         if (getaddrinfo(addr.c_str(), std::to_string(port).c_str(), &hints, &res) || !res) {
-            snprintf(reason, sizeof reason, "the address \"%s\" was not found", addr.c_str());
+            snprintf(reason, sizeof reason, "The address \"%s\" was not found.", addr.c_str());
             return failed(fail(reason));
         }
         memcpy(&g_peer, res->ai_addr, sizeof g_peer);
         freeaddrinfo(res);
         g_have_peer = true;
         fprintf(stderr, "[netplay] joining %s, port %d\n", addr.c_str(), port);
+        static char lobby[200];
+        snprintf(lobby, sizeof lobby, "Looking for the game at  %s  (port %d).\n \nThe host should be on the waiting screen.", addr.c_str(), port);
         Hello he = make<Hello>(T_HELLO);
         he.proto = PROTO; he.content = content; memcpy(he.build, BUILD, sizeof BUILD);
         Config cfg = {};
@@ -568,9 +606,9 @@ bool netplay_start(const NetplayOptions& opt, const char** error) {
                 else raw_send(&he, sizeof he);
             }
             if (!all) started = false;
-            if (now_ms() - t0 > 30000) return failed(fail("no answer from the other player (check the address, and that their port is open)"));
-            fe_wait_pump();
-            Sleep(2);
+            if (now_ms() - t0 > 30000)
+                return failed(fail("There was no answer from that address.\n \nCheck the address, that the host is on the waiting screen,\nand (over the internet) that their router lets the port through."));
+            if (fe_dialog_frame("JOINING AN ONLINE GAME", lobby, "Esc", "Cancel") == 2) return failed(fail(""));
         }
         if (nv) memcpy(nv, nvbuf, NVRAM_SIZE);
         hw_set_unlock_silber(cfg.unlock != 0);
@@ -586,6 +624,8 @@ bool netplay_start(const NetplayOptions& opt, const char** error) {
     savestate_set_pages_separate(true);
     atexit(finish);
     fprintf(stderr, "[netplay] connected: %s, input delay %d frames\n", n.host ? "hosting (player 1)" : "joined (player 2)", n.delay);
+    fe_dialog_off();
+    fe_toast(n.host ? "Connected: you are player 1" : "Connected: you are player 2");
     return true;
 }
 
@@ -645,7 +685,7 @@ void netplay_frame(void* ctx, const void* site, bool in_irq) {
                 break;
             }
         } else {
-            if (n.peer_left) stop("the other player left");
+            if (n.peer_left) stop("The other player left the game.");
             if (frame <= n.remote_have) break;                                   // the real controls are here
             const bool anchor = (saveable && frame <= n.remote_have + 1) || newest_at_or_before(n.remote_have + 1, nullptr);
             if (anchor && frame - n.remote_have <= (uint32_t)MAX_PRED) break;     // play on with a guess
@@ -653,10 +693,11 @@ void netplay_frame(void* ctx, const void* site, bool in_irq) {
         waited = true;
         const double t = now_ms();
         if (t - resent > 8) { send_inputs(frame); resent = t; }
-        if (t - n.last_recv > TIMEOUT_MS) stop("the connection was lost");
-        fe_wait_pump();
-        Sleep(1);
+        if (t - n.last_recv > TIMEOUT_MS) stop("The connection to the other player was lost.");
+        if (t - t0 > 400 && !last) fe_stall_frame("Waiting for the other player");   // long enough to be worth saying
+        else { fe_wait_pump(); Sleep(1); }
     }
+    fe_stall_end();
     if (waited) { n.waits++; n.wait_ms += now_ms() - t0; }
     if (n.replaying) return;                           // a rollback has just started (its first frame is set up)
 

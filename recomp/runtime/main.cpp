@@ -260,7 +260,12 @@ int main(int argc, char** argv) {
         net.max_frames = cfg.max_frames;
         net.unlock_silber = hw_get_unlock_silber();
         const char* why = "";
-        if (!netplay_start(net, &why)) hw_fatal("Online play could not start: %s.", why);
+        if (!netplay_start(net, &why)) {
+            // With a window: say why (unless the player cancelled), then start again for ordinary play.
+            if (g_video_cfg.headless) hw_fatal("Online play could not start: %s", why);
+            if (*why) while (!fe_dialog_frame("ONLINE PLAY COULD NOT START", why, "Enter", "Back to ordinary play")) {}
+            fe_relaunch("");
+        }
     }
     hw_boot(&g_ctx);
 

@@ -23,10 +23,16 @@ What's in it:
 - **Free play** and the arcade operator's rules (difficulty, attack power, timer speed, continue, replay,
   blood and more) from the menu.
 - Xbox-style controllers for two players, keyboard, and remapping for both.
+- **Online play** for two players (menu: Online). One hosts, the other joins by address. It uses
+  rollback, so your own moves respond at once and the game corrects itself when the other player's
+  arrive late.
 
 Known gaps:
 
 - The sound chip's echo effect is not reproduced (no emulator has it yet).
+- Online play connects directly: over the internet the host needs UDP port 7600 forwarded on their
+  router, or both players use a virtual-LAN tool. There is no lobby or matchmaking. It has been tested
+  thoroughly on one PC with simulated bad connections, and not yet widely between different PCs.
 - Setup is not code-signed, so Windows shows "Windows protected your PC" (More info → Run anyway), and an
   antivirus may want you to allow it.
 

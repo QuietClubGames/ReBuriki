@@ -44,6 +44,20 @@ uint64_t fe_activity(void);
 // answering and tells the watchdog the wait is meant.
 void fe_wait_pump(void);
 
+// ---- online play's screens (netplay.cpp) ----
+// One displayed frame of a message box over the last picture (or black before the game has drawn one).
+// Returns 1 when the player pressed Enter / A, 2 for Esc / B, else 0. Without a window: a short sleep, 0.
+int  fe_dialog_frame(const char* title, const char* body, const char* key, const char* label);
+// One displayed frame while the game waits for the other player: the last picture again with a notice at the
+// top; the pause menu still works. fe_stall_end() when the wait is over.
+void fe_dialog_off(void);
+void fe_stall_frame(const char* notice);
+void fe_stall_end(void);
+void fe_toast(const char* text);
+// Start the program again with the online-play options replaced by `netplay_args` ("" = ordinary play), and
+// end this copy.
+[[noreturn]] void fe_relaunch(const char* netplay_args);
+
 // Arcade save memory (the 16 KB nvram at physical 0x1F800000): loaded after hw_init, saved when it changes
 // (at most once a second) and at exit. path = nullptr disables it.
 void fe_nvram_init(const char* path);

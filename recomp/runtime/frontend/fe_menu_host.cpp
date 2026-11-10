@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <shellapi.h>
 
 int g_test_pulse;
 int fe_running_region(void);
@@ -63,7 +65,7 @@ static void host_operator_menu(void) { ui_key(UI_CLOSE, UI_DEV_KEYBOARD); g_test
 static bool g_log_file;
 void fe_note_log_file(bool on) { g_log_file = on; }
 
-static void host_restart(void) {
+[[noreturn]] static void relaunch(wchar_t* cmd) {
     if (!g_no_save) settings_save(&g_settings, fe_path("settings.ini").c_str());
     fe_nvram_save();
     wchar_t exe[MAX_PATH];
@@ -71,7 +73,6 @@ static void host_restart(void) {
     STARTUPINFOW si = {};
     si.cb = sizeof si;
     PROCESS_INFORMATION pi;
-    wchar_t* cmd = _wcsdup(GetCommandLineW());
     fe_log("restarting");
     fflush(stderr);
     d3d_shutdown();                  // give up exclusive full screen before the new copy wants it
@@ -86,6 +87,77 @@ static void host_restart(void) {
     fe_log("restart failed (%lu)", GetLastError());
     exit(1);
 }
+static void host_restart(void) { relaunch(_wcsdup(GetCommandLineW())); }
+
+// One command-line argument, quoted the way Windows programs read it back.
+static void append_arg(std::wstring& cmd, const wchar_t* a) {
+    if (!cmd.empty()) cmd += L' ';
+    if (*a && !wcspbrk(a, L" \t\"")) { cmd += a; return; }
+    cmd += L'"';
+    for (const wchar_t* p = a;; p++) {
+        size_t slashes = 0;
+        while (*p == L'\\') { p++; slashes++; }
+        if (!*p) { cmd.append(slashes * 2, L'\\'); break; }
+        if (*p == L'"') cmd.append(slashes * 2 + 1, L'\\');
+        else cmd.append(slashes, L'\\');
+        cmd += *p;
+    }
+    cmd += L'"';
+}
+
+// The same command line with the online-play options taken out and `netplay_args` (plain ASCII) put in.
+[[noreturn]] void fe_relaunch(const char* netplay_args) {
+    int argc = 0;
+    wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    std::wstring cmd;
+    for (int i = 0; argv && i < argc; i++) {
+        if (i > 0 && (!wcscmp(argv[i], L"--netplay-host") || !wcscmp(argv[i], L"--netplay-join") || !wcscmp(argv[i], L"--netplay-delay"))) { i++; continue; }
+        append_arg(cmd, argv[i]);
+    }
+    if (netplay_args && *netplay_args) {
+        cmd += L' ';
+        for (const char* c = netplay_args; *c; c++) cmd += (wchar_t)(unsigned char)*c;
+    }
+    relaunch(_wcsdup(cmd.c_str()));
+}
+
+// ---------------------------------------------------------------- online play
+static int host_online_active(void) { return netplay_active(); }
+static const char* host_online_status(void) { return netplay_active() ? netplay_status() : "Not connected"; }
+static int host_online_ping(void) { return netplay_ping(); }
+static const char* host_local_address(void) {
+    static char s[96];
+    snprintf(s, sizeof s, "%s    port %d", netplay_local_address(), g_settings.online_port);
+    return s;
+}
+static void host_online_host(void) {
+    char a[96];
+    snprintf(a, sizeof a, "--netplay-host %d --netplay-delay %d", g_settings.online_port, g_settings.online_delay);
+    fe_relaunch(a);
+}
+static void host_online_join(void) {
+    char a[160];
+    if (strchr(g_settings.online_address, ':')) snprintf(a, sizeof a, "--netplay-join %s", g_settings.online_address);
+    else snprintf(a, sizeof a, "--netplay-join %s:%d", g_settings.online_address, g_settings.online_port);
+    fe_relaunch(a);
+}
+static void host_online_leave(void) { fe_relaunch(""); }
+
+// Ctrl+V while typing an address
+static void paste_text(void) {
+    if (!OpenClipboard(nullptr)) return;
+    if (HANDLE h = GetClipboardData(CF_TEXT)) {
+        if (const char* t = (const char*)GlobalLock(h)) {
+            for (int n = 0; *t && n < 80; t++, n++) {
+                const char c = *t;
+                if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == ':' || c == '-') ui_text_input(c);
+                else if (c >= 'A' && c <= 'Z') ui_text_input(c + 32);
+            }
+            GlobalUnlock(h);
+        }
+    }
+    CloseClipboard();
+}
 static void host_quit(void) { fe_quit(); }
 static int host_monitor_count(void) { return video_monitor_count(); }
 static const char* host_monitor_name(int i) { return video_monitor_name(i); }
@@ -97,6 +169,8 @@ static const UiHost k_host = {
     host_settings_changed, host_controller_name, bind_pad_name, bind_key_name, host_start_capture, host_capturing,
     host_reset_bindings, bind_deadzone_percent, bind_set_deadzone_percent, host_operator_menu, host_restart, host_quit,
     host_monitor_count, host_monitor_name, host_gpu_count, host_gpu_name, fe_running_region, host_save_info,
+    host_online_active, host_online_status, host_local_address, host_online_host, host_online_join, host_online_leave,
+    host_online_ping,
 };
 
 void menu_host_init(void) {
@@ -159,6 +233,21 @@ static void keyboard(void) {
         }
         if (!ui_menu_visible() || !ui_menu_wants_pause()) {
             if ((vk == VK_ESCAPE || vk == VK_TAB) && !repeat) menu_toggle(UI_DEV_KEYBOARD);
+            continue;
+        }
+        if (ui_text_editing()) {                      // typing an address (Online page)
+            const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
+            if (vk == VK_RETURN) { if (!repeat) ui_text_input(13); }
+            else if (vk == VK_ESCAPE) { if (!repeat) ui_text_input(27); }
+            else if (vk == VK_BACK) ui_text_input(8);
+            else if (ctrl && vk == 'V') { if (!repeat) paste_text(); }
+            else if (ctrl) {}
+            else if (vk >= '0' && vk <= '9' && !shift) ui_text_input(vk);
+            else if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) ui_text_input('0' + (vk - VK_NUMPAD0));
+            else if (vk >= 'A' && vk <= 'Z') ui_text_input(vk + 32);
+            else if (vk == VK_OEM_PERIOD || vk == VK_DECIMAL) ui_text_input('.');
+            else if (vk == VK_OEM_MINUS || vk == VK_SUBTRACT) ui_text_input('-');
+            else if (vk == VK_OEM_1 && shift) ui_text_input(':');
             continue;
         }
         switch (vk) {
