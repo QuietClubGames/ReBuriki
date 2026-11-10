@@ -9,6 +9,10 @@ project's source (tracked files only). It holds NO ROM data and nothing made fro
 game from the player's own buriki.zip and hng64.zip. Needs the developer toolchain on PATH
 (x86_64-w64-mingw32-clang++, llvm-mingw), N64Recomp built in third_party/N64Recomp/build, and Pillow (icon).
 
+setup_art.png (or .jpg / .webp) in the repo root, if present, becomes the picture down the right-hand side of
+the Setup window (files/setup_art.png). It is not kept in the repository (.gitignore): official artwork belongs to
+the game's owners, so whether a public download carries one is a decision for whoever publishes it.
+
 Adapted from ReLayer's tools/install/make_package.py (Copyright (c) 2026 The ReLayer project, MIT License).
 The names (product, exe, version, publisher) are in product.py.
 """
@@ -230,6 +234,21 @@ def package_n64recomp():
     copy(os.path.join(N64RECOMP, "LICENSE"), os.path.join(dst, "LICENSE.txt"))
 
 
+def package_art():
+    """The Setup window's picture, as a PNG no taller than it is ever shown (Setup scales it to the window)."""
+    for ext in (".png", ".jpg", ".jpeg", ".webp"):
+        src = os.path.join(ROOT, "setup_art" + ext)
+        if os.path.isfile(src):
+            from PIL import Image
+            im = Image.open(src).convert("RGB")
+            if im.height > 1400:
+                im = im.resize((round(im.width * 1400 / im.height), 1400), Image.LANCZOS)
+            im.save(os.path.join(FILES, "setup_art.png"), optimize=True)
+            say(f"setup picture: {os.path.basename(src)} {im.width}x{im.height}")
+            return
+    say("setup picture: none (plain dark window)")
+
+
 def licenses():
     lic = os.path.join(OUT, "licenses")
     copy(os.path.join(ROOT, "LICENSE.md"), os.path.join(lic, product.PRODUCT + ".md"))
@@ -357,6 +376,7 @@ def main():
     package_python()
     package_clang(tc)
     package_n64recomp()
+    package_art()
     licenses()
     with open(os.path.join(OUT, "README.txt"), "w", newline="\r\n") as f:
         f.write(README.format(product=product.PRODUCT, display=product.DESCRIPTION))

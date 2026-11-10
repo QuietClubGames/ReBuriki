@@ -471,6 +471,16 @@ player's PC from their own `buriki.zip` and `hng64.zip`.
   and `Uninstall.exe` (asks whether to keep settings). It finds the zips next to itself, one
   folder up, or in Downloads. Test switches: `/rom= /bios= /dest= /silent /noshortcuts
   /noregister /shot=`.
+- **Look (2026-11-10, asked for by the user):** dark, in the pause menu's colours. Only the text
+  boxes and buttons are Windows controls (buttons and tick boxes owner-drawn); labels, hints,
+  progress bar and status are painted over a cached background. The title bar is dark on
+  Windows 10 2004+.
+- **Setup picture:** `setup_art.png` (or .jpg/.webp) in the repo root becomes
+  `files/setup_art.png`, shown full height down the right of the window under a dark overlay
+  that fades it into the panel. The window widens to fit the picture's shape. Without the file
+  the window is the plain dark column. The file is gitignored: the user's picture is official
+  Buriki One artwork, so it stays out of the repository, and whether a public download carries
+  it is their call.
 - **`build_from_rom.py`** (also runs on the dev machine with the tools on PATH):
   1. finds the 33 game files and 4 system files by size + CRC-32, whatever they're named
      (`brom1.bin` and `tmp87ph40an.bin` required; `bios_us.bin`, `bios_export.bin` optional);

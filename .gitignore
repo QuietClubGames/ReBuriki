@@ -42,3 +42,4 @@ recomp/soak_script.txt
 # --- Installer packages (tools/install/make_package.py) ---
 dist/
 tools/install/*.ico
+setup_art.*

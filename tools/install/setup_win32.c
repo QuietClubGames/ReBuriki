@@ -2,8 +2,9 @@
  * Setup: builds Buriki One for PC from the player's own ROMs and installs it.
  *
  * Adapted from ReLayer's Setup (tools/install/setup_win32.c), Copyright (c) 2026 The ReLayer project, MIT License
- * (licenses/ReLayer-MIT.txt). Changes: two ROM sets (the game and the Hyper Neo Geo 64 system ROMs), no banner
- * picture, names from product.h (written by make_package.py from product.py).
+ * (licenses/ReLayer-MIT.txt). Changes: two ROM sets (the game and the Hyper Neo Geo 64 system ROMs), a dark
+ * window drawn by Setup itself with an optional picture down its right-hand side, names from product.h (written
+ * by make_package.py from product.py).
  *
  * Layout of the Setup folder (made by tools/install/make_package.py):
  *     Setup.exe
@@ -11,10 +12,15 @@
  *     files/clang/       64-bit clang++ + linker + Windows and C++ headers/libraries
  *     files/n64recomp/   N64Recomp.exe (the MIPS-to-C translator) and its recomp.h
  *     files/source/      this project's source (no ROM data)
+ *     files/setup_art.png (optional) the picture on the right of the window
  *
  * Setup runs files/source/tools/install/build_from_rom.py, shows its "@@progress" lines, writes everything
  * else to <install folder>/setup.log, then adds shortcuts and an "Apps & features" entry (per user, no admin).
  * Copied into the install folder as Uninstall.exe it removes the game again.
+ *
+ * The window: only the three text boxes and the buttons are Windows controls (the buttons and tick boxes are
+ * owner-drawn); the labels, hints, progress bar and status line are painted, over a background made once
+ * (make_background).
  *
  * Command line (for testing):  /rom=<zip> /bios=<zip> /dest=<folder> /silent /noshortcuts /noregister /shot=<bmp>
  */
@@ -27,30 +33,65 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <wincodec.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <wchar.h>
 
-#include "product.h"     /* P_PRODUCT, P_GAME, P_EXE, P_PUBLISHER, P_DISPLAY: wide string literals */
+#include "product.h"     /* P_PRODUCT, P_GAME, P_EXE, P_PUBLISHER, P_DISPLAY, P_VERSION: wide string literals */
 
 #define APP_TITLE P_PRODUCT L" Setup"
 #define UNINSTALL_KEY L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" P_PRODUCT
 
-enum { ID_ROM = 100, ID_ROM_BROWSE, ID_DEST, ID_DEST_BROWSE, ID_DESKTOP, ID_STARTMENU, ID_PROGRESS, ID_STATUS,
-       ID_GO, ID_CANCEL, ID_HINT_ROM, ID_HINT_FOOT, ID_BIOS, ID_BIOS_BROWSE, ID_HINT_BIOS };
+/* the pause menu's colours */
+#define C_BG      RGB(0x12, 0x13, 0x1A)
+#define C_FIELD   RGB(0x1C, 0x1E, 0x29)
+#define C_BORDER  RGB(0x36, 0x39, 0x49)
+#define C_BUTTON  RGB(0x27, 0x2A, 0x38)
+#define C_PRESSED RGB(0x1F, 0x21, 0x2D)
+#define C_TEXT    RGB(0xEC, 0xED, 0xF1)
+#define C_DIM     RGB(0x8E, 0x91, 0x9E)
+#define C_OFF     RGB(0x5C, 0x5F, 0x6C)
+#define C_GOLD    RGB(0xE8, 0xB6, 0x4C)
+#define C_GOLD_LO RGB(0xC2, 0x96, 0x38)
+#define C_ERROR   RGB(0xF0, 0x70, 0x68)
+#define C_ON_GOLD RGB(0x15, 0x16, 0x1B)
+
+enum { ID_ROM = 100, ID_ROM_BROWSE, ID_DEST, ID_DEST_BROWSE, ID_DESKTOP, ID_STARTMENU, ID_GO, ID_CANCEL, ID_BIOS,
+       ID_BIOS_BROWSE };
 enum { WM_APP_PROGRESS = WM_APP + 1, WM_APP_DONE };
 
+/* layout, in 96-dpi pixels */
+#define COL_X 28                /* the left column: labels, text boxes, buttons */
+#define COL_W 540
+#define EDIT_W 434
+#define BROWSE_W 98
+#define ROW1_Y 142
+#define ROW2_Y 232
+#define ROW3_Y 322
+#define CHECK_Y 392
+#define PROG_Y 436
+#define STATUS_Y 454
+#define BUTTON_Y 522
+#define WIN_H 580
+#define ART_OVERLAP 44          /* the picture starts this far inside the column's right margin, faded out */
+
 static HINSTANCE g_inst;
-static HWND g_wnd, g_rom, g_dest, g_desktop, g_startmenu, g_progress, g_status, g_go, g_cancel, g_rom_browse,
-    g_dest_browse, g_bios, g_bios_browse;
+static HWND g_wnd, g_rom, g_dest, g_desktop, g_startmenu, g_go, g_cancel, g_rom_browse, g_dest_browse, g_bios,
+    g_bios_browse;
 static HFONT g_font, g_font_bold, g_font_small, g_font_title, g_font_sub;
-static HBITMAP g_banner;
-static int g_dpi = 96;
+static HBRUSH g_br_bg, g_br_field;
+static HBITMAP g_bg;            /* the whole client area's background */
+static int g_dpi = 96, g_win_w = COL_X + COL_W + COL_X, g_art_w;   /* g_art_w: picture width, 96-dpi pixels */
 static wchar_t g_setup_dir[MAX_PATH], g_files[MAX_PATH];
 static HANDLE g_job, g_child;
 static volatile LONG g_running;
 static wchar_t g_error[1024], g_done_exe[MAX_PATH], g_log_path[MAX_PATH];
+static wchar_t g_status[1200] = L"Setup makes the game from your ROMs on this PC. It takes a minute or two (longer on an "
+                                L"older PC) and needs about 500 MB of free space.";
+static int g_pct;
+static int g_want_desktop = 1, g_want_startmenu = 1;
 static int g_state;     /* 0 = ready, 1 = installing, 2 = finished, 3 = failed */
 static int g_silent, g_no_shortcuts, g_no_register, g_exit_code;
 static wchar_t g_shot[MAX_PATH];
@@ -66,23 +107,102 @@ static int file_exists(const wchar_t *p) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-/* ------------------------------------------------------------------ banner: a dark panel with a warm glow */
-static HBITMAP make_banner(int w, int h) {
+/* ------------------------------------------------------------------ the picture (files/setup_art.png) */
+static const GUID k_wic_clsid = {0xcacaf262, 0x9370, 0x4615, {0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0x0a}};
+static const GUID k_wic_iid = {0xec5ec8a9, 0xc395, 0x4314, {0x9c, 0x77, 0x54, 0xd7, 0xa9, 0x35, 0xff, 0x70}};
+static const GUID k_wic_bgra = {0x6fddc324, 0x4e03, 0x4bfe, {0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x0e}};
+
+/* Open the picture. With pixels == NULL only its size is read; otherwise it is scaled to w x h BGRA pixels. */
+static int load_art(UINT *iw, UINT *ih, uint32_t *pixels, int w, int h) {
+    wchar_t art[MAX_PATH];
+    path_join(art, g_files, L"setup_art.png");
+    if (!file_exists(art)) return 0;
+    IWICImagingFactory *f = NULL;
+    IWICBitmapDecoder *dec = NULL;
+    IWICBitmapFrameDecode *fr = NULL;
+    IWICBitmapScaler *sc = NULL;
+    IWICFormatConverter *cv = NULL;
+    int ok = 0;
+    if (SUCCEEDED(CoCreateInstance(&k_wic_clsid, NULL, CLSCTX_INPROC_SERVER, &k_wic_iid, (void **)&f)) &&
+        SUCCEEDED(IWICImagingFactory_CreateDecoderFromFilename(f, art, NULL, GENERIC_READ,
+                                                               WICDecodeMetadataCacheOnDemand, &dec)) &&
+        SUCCEEDED(IWICBitmapDecoder_GetFrame(dec, 0, &fr)) &&
+        SUCCEEDED(IWICBitmapFrameDecode_GetSize(fr, iw, ih)) && *iw > 0 && *ih > 0) {
+        if (!pixels) ok = 1;
+        else if (SUCCEEDED(IWICImagingFactory_CreateBitmapScaler(f, &sc)) &&
+                 SUCCEEDED(IWICBitmapScaler_Initialize(sc, (IWICBitmapSource *)fr, (UINT)w, (UINT)h,
+                                                       WICBitmapInterpolationModeFant)) &&
+                 SUCCEEDED(IWICImagingFactory_CreateFormatConverter(f, &cv)) &&
+                 SUCCEEDED(IWICFormatConverter_Initialize(cv, (IWICBitmapSource *)sc, &k_wic_bgra,
+                                                          WICBitmapDitherTypeNone, NULL, 0, WICBitmapPaletteTypeCustom)) &&
+                 SUCCEEDED(IWICFormatConverter_CopyPixels(cv, NULL, (UINT)w * 4, (UINT)(w * h * 4), (BYTE *)pixels)))
+            ok = 1;
+    }
+    if (cv) IWICFormatConverter_Release(cv);
+    if (sc) IWICBitmapScaler_Release(sc);
+    if (fr) IWICBitmapFrameDecode_Release(fr);
+    if (dec) IWICBitmapDecoder_Release(dec);
+    if (f) IWICImagingFactory_Release(f);
+    return ok;
+}
+
+/* How wide the picture is shown: as tall as the window, in its own shape, within sensible limits. */
+static void measure_art(void) {
+    UINT iw, ih;
+    if (!load_art(&iw, &ih, NULL, 0, 0)) return;
+    g_art_w = (int)((double)WIN_H * iw / ih + 0.5);
+    if (g_art_w < 200) g_art_w = 200;
+    if (g_art_w > 520) g_art_w = 520;
+    g_win_w = COL_X + COL_W + COL_X - ART_OVERLAP + g_art_w;
+}
+
+/* The background: the menu's dark panel; with a picture, it runs down the right-hand side under a dark overlay
+ * that is solid at the picture's left edge (so it grows out of the panel) and lightest at the window's edge. */
+static HBITMAP make_background(int w, int h) {
     BITMAPINFO bi = {{sizeof(BITMAPINFOHEADER), w, -h, 1, 32, BI_RGB}};
     void *bits;
     HBITMAP bmp = CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
     if (!bmp) return NULL;
     uint32_t *px = bits;
-    /* the pause menu's colours: 0x1B1D27 at the top to 0x0E0F15 at the bottom, with gold light from the right */
-    for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++) {
-            float v = (float)y / (float)h, t = (float)x / (float)w;
-            float r = 0x1B + (0x0E - 0x1B) * v, g = 0x1D + (0x0F - 0x1D) * v, b = 0x27 + (0x15 - 0x27) * v;
-            float glow = t > 0.45f ? (t - 0.45f) / 0.55f : 0;
-            glow = glow * glow * 0.16f * (1.0f - 0.5f * v);
-            r += (0xE8 - r) * glow; g += (0xB6 - g) * glow; b += (0x4C - b) * glow;
-            px[y * w + x] = (uint32_t)((int)r << 16 | (int)g << 8 | (int)b);
+    const int br = GetRValue(C_BG), bg = GetGValue(C_BG), bb = GetBValue(C_BG);
+    for (int i = 0; i < w * h; i++) px[i] = (uint32_t)(br << 16 | bg << 8 | bb);
+
+    int aw = S(g_art_w), ok = 0;
+    uint32_t *art = NULL;
+    if (aw > 0 && aw <= w) {
+        UINT iw, ih;
+        if (load_art(&iw, &ih, NULL, 0, 0)) {
+            /* cover aw x h: scale to the height, or to the width if that leaves a gap, and centre the crop */
+            int sw = (int)((double)h * iw / ih + 0.5), sh = h;
+            if (sw < aw) { sw = aw; sh = (int)((double)aw * ih / iw + 0.5); }
+            art = malloc((size_t)sw * sh * 4);
+            if (art && load_art(&iw, &ih, art, sw, sh)) {
+                int ox = (sw - aw) / 2, oy = (sh - h) / 4, x0 = w - aw;
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < aw; x++) {
+                        /* how much of the picture shows: 0 at its left edge, rising smoothly, a little less
+                         * towards the bottom where the buttons' row ends */
+                        float t = (float)x / (float)aw, k = t < 0.5f ? t / 0.5f : 1.0f;
+                        k = k * k * (3 - 2 * k) * 0.80f * (1.0f - 0.30f * (float)y / (float)h);
+                        uint32_t c = art[(y + oy) * sw + x + ox];
+                        int r = (int)(((c >> 16) & 255) * k + br * (1 - k)), g = (int)(((c >> 8) & 255) * k + bg * (1 - k)),
+                            b = (int)((c & 255) * k + bb * (1 - k));
+                        px[y * w + x0 + x] = (uint32_t)(r << 16 | g << 8 | b);
+                    }
+                ok = 1;
+            }
         }
+    }
+    free(art);
+    if (!ok) {
+        /* no picture: a faint gold light from the right, as on the menu's plain panel */
+        for (int y = 0; y < h; y++)
+            for (int x = w / 2; x < w; x++) {
+                float t = (float)(x - w / 2) / (float)(w / 2), k = t * t * 0.10f * (1.0f - 0.6f * (float)y / (float)h);
+                int r = (int)(0xE8 * k + br * (1 - k)), g = (int)(0xB6 * k + bg * (1 - k)), b = (int)(0x4C * k + bb * (1 - k));
+                px[y * w + x] = (uint32_t)(r << 16 | g << 8 | b);
+            }
+    }
     return bmp;
 }
 
@@ -303,6 +423,12 @@ static int uninstall(const wchar_t *dir) {
 }
 
 /* ------------------------------------------------------------------ the window */
+static void set_status(const wchar_t *text) {
+    wcsncpy(g_status, text, sizeof g_status / sizeof g_status[0] - 1);
+    RECT r = {S(COL_X), S(PROG_Y - 4), S(COL_X + COL_W), S(BUTTON_Y - 4)};
+    InvalidateRect(g_wnd, &r, FALSE);
+}
+
 static void set_state(int st) {
     g_state = st;
     int idle = st == 0 || st == 3;
@@ -317,6 +443,7 @@ static void set_state(int st) {
     SetWindowTextW(g_go, st == 2 ? L"Play" : st == 3 ? L"Try again" : L"Install");
     EnableWindow(g_go, st != 1);
     SetWindowTextW(g_cancel, st == 2 ? L"Close" : L"Cancel");
+    InvalidateRect(g_wnd, NULL, FALSE);
 }
 
 static void browse_zip(HWND edit, const wchar_t *title) {
@@ -360,6 +487,7 @@ static void browse_dest(void) {
 }
 
 static void go(void) {
+    if (g_state == 1) return;
     if (g_state == 2) {
         wchar_t dir[MAX_PATH];
         GetWindowTextW(g_dest, dir, MAX_PATH);
@@ -385,11 +513,11 @@ static void go(void) {
     if (!dest[0]) return;
     g_error[0] = 0;
     g_done_exe[0] = 0;
-    SendMessageW(g_progress, PBM_SETPOS, 0, 0);
-    SetWindowTextW(g_status, L"Starting");
+    g_pct = 0;
+    set_status(L"Starting");
     set_state(1);
     if (!start_build(rom, bios, dest)) {
-        SetWindowTextW(g_status, g_error);
+        set_status(g_error);
         set_state(3);
         if (g_silent) g_exit_code = 1, DestroyWindow(g_wnd);
     }
@@ -403,18 +531,16 @@ static void finished(DWORD code) {
         wchar_t dest[MAX_PATH];
         GetWindowTextW(g_dest, dest, MAX_PATH);
         if (!g_no_shortcuts) {
-            if (SendMessageW(g_desktop, BM_GETCHECK, 0, 0) == BST_CHECKED) make_shortcut(CSIDL_DESKTOPDIRECTORY, g_done_exe, dest);
-            if (SendMessageW(g_startmenu, BM_GETCHECK, 0, 0) == BST_CHECKED) make_shortcut(CSIDL_PROGRAMS, g_done_exe, dest);
+            if (g_want_desktop) make_shortcut(CSIDL_DESKTOPDIRECTORY, g_done_exe, dest);
+            if (g_want_startmenu) make_shortcut(CSIDL_PROGRAMS, g_done_exe, dest);
         }
         if (!g_no_register) register_uninstall(dest, g_done_exe);
-        SendMessageW(g_progress, PBM_SETPOS, 100, 0);
-        SetWindowTextW(g_status, L"Installed. Press Play to start (Back + Start or Tab opens the menu in game).");
+        g_pct = 100;
+        set_status(L"Installed. Press Play to start (Back + Start or Tab opens the menu in game).");
         set_state(2);
         g_exit_code = 0;
     } else {
-        wchar_t msg[1200];
-        swprintf(msg, 1200, L"%ls", g_error[0] ? g_error : L"Setup stopped (see setup.log in the install folder).");
-        SetWindowTextW(g_status, msg);
+        set_status(g_error[0] ? g_error : L"Setup stopped (see setup.log in the install folder).");
         set_state(3);
         g_exit_code = 1;
     }
@@ -428,76 +554,162 @@ static HWND add(const wchar_t *cls, const wchar_t *text, DWORD style, int x, int
     return c;
 }
 
-#define WIN_W 620
-#define BANNER_H 130
-#define BODY_H (20 + 86 + 86 + 64 + 40 + 86 + 32 + 22)
+/* A text box: the borderless edit control sits inside a rounded field that paint_dc draws. */
+#define FIELD_H 32
+static HWND add_field(int y, int id) {
+    return add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, COL_X + 10, y + 26 + 6, EDIT_W - 20, FIELD_H - 12, id, g_font);
+}
 
 static void create_controls(void) {
     g_font = CreateFontW(-S(15), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
     g_font_bold = CreateFontW(-S(15), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
     g_font_small = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    g_font_title = CreateFontW(-S(34), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+    g_font_title = CreateFontW(-S(38), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
     g_font_sub = CreateFontW(-S(15), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    g_banner = make_banner(S(WIN_W), S(BANNER_H));
+    g_br_bg = CreateSolidBrush(C_BG);
+    g_br_field = CreateSolidBrush(C_FIELD);
+    RECT cr;
+    GetClientRect(g_wnd, &cr);
+    g_bg = make_background(cr.right, cr.bottom);
 
-    int y = BANNER_H + 20;
-    add(L"STATIC", L"Your " P_GAME L" ROM", 0, 24, y, 400, 20, 0, g_font_bold);
-    g_rom = add(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 24, y + 24, 470, 26, ID_ROM, g_font);
-    g_rom_browse = add(L"BUTTON", L"Browse...", WS_TABSTOP, 502, y + 23, 94, 28, ID_ROM_BROWSE, g_font);
-    add(L"STATIC", L"The MAME set buriki.zip (" P_GAME L", rev. B). It is checked before anything is installed.", 0, 24,
-        y + 54, 572, 18, ID_HINT_ROM, g_font_small);
-    y += 86;
-    add(L"STATIC", L"Your Hyper Neo Geo 64 system ROM", 0, 24, y, 400, 20, 0, g_font_bold);
-    g_bios = add(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 24, y + 24, 470, 26, ID_BIOS, g_font);
-    g_bios_browse = add(L"BUTTON", L"Browse...", WS_TABSTOP, 502, y + 23, 94, 28, ID_BIOS_BROWSE, g_font);
-    add(L"STATIC", L"The MAME set hng64.zip: the arcade board's own startup and control programs.", 0, 24,
-        y + 54, 572, 18, ID_HINT_BIOS, g_font_small);
-    y += 86;
-    add(L"STATIC", L"Install to", 0, 24, y, 400, 20, 0, g_font_bold);
-    g_dest = add(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 24, y + 24, 470, 26, ID_DEST, g_font);
-    g_dest_browse = add(L"BUTTON", L"Browse...", WS_TABSTOP, 502, y + 23, 94, 28, ID_DEST_BROWSE, g_font);
-    y += 64;
-    g_desktop = add(L"BUTTON", L"Desktop shortcut", BS_AUTOCHECKBOX | WS_TABSTOP, 24, y, 180, 22, ID_DESKTOP, g_font);
-    g_startmenu = add(L"BUTTON", L"Start menu shortcut", BS_AUTOCHECKBOX | WS_TABSTOP, 214, y, 200, 22, ID_STARTMENU, g_font);
-    SendMessageW(g_desktop, BM_SETCHECK, BST_CHECKED, 0);
-    SendMessageW(g_startmenu, BM_SETCHECK, BST_CHECKED, 0);
-    y += 40;
-    g_progress = add(PROGRESS_CLASSW, L"", 0, 24, y, 572, 14, ID_PROGRESS, g_font);
-    SendMessageW(g_progress, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
-    g_status = add(L"STATIC", L"Setup makes the game from your ROMs on this PC. It takes a minute or two (longer on an older PC) "
-                              L"and needs about 500 MB of free space.", SS_LEFT, 24,
-                   y + 22, 572, 54, ID_STATUS, g_font_small);
-    y += 86;
-    g_go = add(L"BUTTON", L"Install", BS_DEFPUSHBUTTON | WS_TABSTOP, 392, y, 98, 32, ID_GO, g_font_bold);
-    g_cancel = add(L"BUTTON", L"Cancel", WS_TABSTOP, 498, y, 98, 32, ID_CANCEL, g_font);
-    add(L"STATIC", L"No game data comes with Setup.", 0, 24, y + 8, 340, 18, ID_HINT_FOOT, g_font_small);
+    const int bx = COL_X + EDIT_W + 8, bo = 26;     /* Browse buttons; the fields sit 26 below their labels */
+    g_rom = add_field(ROW1_Y, ID_ROM);
+    g_rom_browse = add(L"BUTTON", L"Browse...", BS_OWNERDRAW | WS_TABSTOP, bx, ROW1_Y + bo, BROWSE_W, FIELD_H, ID_ROM_BROWSE, g_font);
+    g_bios = add_field(ROW2_Y, ID_BIOS);
+    g_bios_browse = add(L"BUTTON", L"Browse...", BS_OWNERDRAW | WS_TABSTOP, bx, ROW2_Y + bo, BROWSE_W, FIELD_H, ID_BIOS_BROWSE, g_font);
+    g_dest = add_field(ROW3_Y, ID_DEST);
+    g_dest_browse = add(L"BUTTON", L"Browse...", BS_OWNERDRAW | WS_TABSTOP, bx, ROW3_Y + bo, BROWSE_W, FIELD_H, ID_DEST_BROWSE, g_font);
+    g_desktop = add(L"BUTTON", L"Desktop shortcut", BS_OWNERDRAW | WS_TABSTOP, COL_X, CHECK_Y, 180, 24, ID_DESKTOP, g_font);
+    g_startmenu = add(L"BUTTON", L"Start menu shortcut", BS_OWNERDRAW | WS_TABSTOP, COL_X + 190, CHECK_Y, 200, 24, ID_STARTMENU, g_font);
+    g_go = add(L"BUTTON", L"Install", BS_OWNERDRAW | WS_TABSTOP, COL_X + COL_W - 104 - 8 - 104, BUTTON_Y, 104, 34, ID_GO, g_font_bold);
+    g_cancel = add(L"BUTTON", L"Cancel", BS_OWNERDRAW | WS_TABSTOP, COL_X + COL_W - 104, BUTTON_Y, 104, 34, ID_CANCEL, g_font);
 }
 
-static void paint_dc(HWND h, HDC dc) {
+static void fill_round(HDC dc, int x0, int y0, int x1, int y1, int radius, COLORREF fill, COLORREF edge) {
+    HBRUSH b = CreateSolidBrush(fill);
+    HPEN p = CreatePen(PS_SOLID, 1, edge);
+    HGDIOBJ ob = SelectObject(dc, b), op = SelectObject(dc, p);
+    RoundRect(dc, x0, y0, x1, y1, radius, radius);
+    SelectObject(dc, ob);
+    SelectObject(dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+}
+
+static void text_at(HDC dc, HFONT font, COLORREF colour, int x, int y, const wchar_t *s) {
+    SelectObject(dc, font);
+    SetTextColor(dc, colour);
+    TextOutW(dc, S(x), S(y), s, (int)wcslen(s));
+}
+
+/* Buttons and tick boxes (all owner-drawn). */
+static void draw_item(const DRAWITEMSTRUCT *d) {
+    HDC dc = d->hDC;
+    RECT r = d->rcItem;
+    int id = (int)d->CtlID, off = (d->itemState & ODS_DISABLED) != 0, down = (d->itemState & ODS_SELECTED) != 0,
+        focus = (d->itemState & ODS_FOCUS) != 0 && !(d->itemState & ODS_NOFOCUSRECT);
+    wchar_t text[64];
+    GetWindowTextW(d->hwndItem, text, 64);
+    FillRect(dc, &r, g_br_bg);
+    SetBkMode(dc, TRANSPARENT);
+    SelectObject(dc, (HFONT)SendMessageW(d->hwndItem, WM_GETFONT, 0, 0));
+    if (id == ID_DESKTOP || id == ID_STARTMENU) {
+        int on = id == ID_DESKTOP ? g_want_desktop : g_want_startmenu;
+        int b = S(18), top = (r.bottom - b) / 2;
+        fill_round(dc, 0, top, b, top + b, S(5), on ? (off ? C_GOLD_LO : C_GOLD) : C_FIELD, on ? C_GOLD_LO : (focus ? C_GOLD : C_BORDER));
+        if (on) {                                   /* the tick */
+            HPEN p = CreatePen(PS_SOLID, S(2), C_ON_GOLD);
+            HGDIOBJ op = SelectObject(dc, p);
+            MoveToEx(dc, S(4), top + S(9), NULL);
+            LineTo(dc, S(8), top + S(13));
+            LineTo(dc, S(14), top + S(5));
+            SelectObject(dc, op);
+            DeleteObject(p);
+        }
+        RECT tr = {b + S(9), 0, r.right, r.bottom};
+        SetTextColor(dc, off ? C_OFF : C_TEXT);
+        DrawTextW(dc, text, -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+        if (focus) {
+            RECT fr = {b + S(6), r.bottom - S(3), b + S(9) + S(40), r.bottom - S(2)};
+            HBRUSH g = CreateSolidBrush(C_GOLD);
+            FillRect(dc, &fr, g);
+            DeleteObject(g);
+        }
+        return;
+    }
+    int primary = id == ID_GO;
+    COLORREF fill = primary ? (off ? C_BUTTON : down ? C_GOLD_LO : C_GOLD) : (down ? C_PRESSED : C_BUTTON);
+    COLORREF edge = primary && !off ? C_GOLD_LO : focus ? C_GOLD : C_BORDER;
+    fill_round(dc, 0, 0, r.right, r.bottom, S(8), fill, edge);
+    SetTextColor(dc, off ? C_OFF : primary ? C_ON_GOLD : C_TEXT);
+    DrawTextW(dc, text, -1, &r, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+    if (primary && focus && !off) {                 /* a second, inner ring for keyboard focus */
+        HPEN p = CreatePen(PS_SOLID, 1, C_ON_GOLD);
+        HGDIOBJ op = SelectObject(dc, p), ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        RoundRect(dc, S(3), S(3), r.right - S(3), r.bottom - S(3), S(6), S(6));
+        SelectObject(dc, op);
+        SelectObject(dc, ob);
+        DeleteObject(p);
+    }
+}
+
+static void row(HDC dc, int y, const wchar_t *label, const wchar_t *hint, HWND edit) {
+    text_at(dc, g_font_bold, C_TEXT, COL_X, y, label);
+    fill_round(dc, S(COL_X), S(y + 26), S(COL_X + EDIT_W), S(y + 26 + FIELD_H), S(8), C_FIELD,
+               GetFocus() == edit ? C_GOLD : C_BORDER);
+    if (hint) text_at(dc, g_font_small, C_DIM, COL_X, y + 26 + FIELD_H + 6, hint);
+}
+
+static void paint_dc(HWND h, HDC out) {
     RECT cr;
     GetClientRect(h, &cr);
-    HBRUSH white = GetSysColorBrush(COLOR_WINDOW);
-    RECT body = {0, S(BANNER_H), cr.right, cr.bottom};
-    FillRect(dc, &body, white);
-    if (g_banner) {
-        HDC m = CreateCompatibleDC(dc);
-        HGDIOBJ old = SelectObject(m, g_banner);
-        BitBlt(dc, 0, 0, S(WIN_W), S(BANNER_H), m, 0, 0, SRCCOPY);
+    /* draw into a buffer, then show it in one go (no flicker) */
+    HDC dc = CreateCompatibleDC(out);
+    HBITMAP buf = CreateCompatibleBitmap(out, cr.right, cr.bottom);
+    HGDIOBJ old_buf = SelectObject(dc, buf);
+    if (g_bg) {
+        HDC m = CreateCompatibleDC(out);
+        HGDIOBJ old = SelectObject(m, g_bg);
+        BitBlt(dc, 0, 0, cr.right, cr.bottom, m, 0, 0, SRCCOPY);
         SelectObject(m, old);
         DeleteDC(m);
-    }
+    } else FillRect(dc, &cr, g_br_bg);
     SetBkMode(dc, TRANSPARENT);
-    SelectObject(dc, g_font_title);
-    SetTextColor(dc, RGB(0xF4, 0xF5, 0xF8));
-    TextOutW(dc, S(26), S(30), P_PRODUCT, (int)wcslen(P_PRODUCT));
-    HBRUSH gold = CreateSolidBrush(RGB(0xE8, 0xB6, 0x4C));
-    RECT bar = {S(28), S(76), S(28 + 64), S(76 + 4)};
+
+    /* title */
+    text_at(dc, g_font_title, C_TEXT, COL_X - 2, 24, P_PRODUCT);
+    HBRUSH gold = CreateSolidBrush(C_GOLD);
+    RECT bar = {S(COL_X), S(78), S(COL_X + 64), S(78 + 4)};
     FillRect(dc, &bar, gold);
+    text_at(dc, g_font_sub, C_DIM, COL_X, 94, P_GAME L" on PC: setup");
+
+    row(dc, ROW1_Y, L"Your " P_GAME L" ROM",
+        L"The MAME set buriki.zip (" P_GAME L", rev. B). It is checked before anything is installed.", g_rom);
+    row(dc, ROW2_Y, L"Your Hyper Neo Geo 64 system ROM",
+        L"The MAME set hng64.zip: the arcade board's own startup and control programs.", g_bios);
+    row(dc, ROW3_Y, L"Install to", NULL, g_dest);
+
+    /* progress bar */
+    int x0 = S(COL_X), x1 = S(COL_X + COL_W), y0 = S(PROG_Y), y1 = S(PROG_Y + 8);
+    fill_round(dc, x0, y0, x1, y1, S(8), C_FIELD, C_FIELD);
+    if (g_pct > 0) {
+        int xe = x0 + (x1 - x0) * (g_pct > 100 ? 100 : g_pct) / 100;
+        if (xe < x0 + S(8)) xe = x0 + S(8);
+        fill_round(dc, x0, y0, xe, y1, S(8), C_GOLD, C_GOLD);
+    }
+    /* status (wraps over up to three lines) */
+    RECT sr = {S(COL_X), S(STATUS_Y), S(COL_X + COL_W), S(BUTTON_Y - 6)};
+    SelectObject(dc, g_font_small);
+    SetTextColor(dc, g_state == 3 ? C_ERROR : g_state == 2 ? C_TEXT : C_DIM);
+    DrawTextW(dc, g_status, -1, &sr, DT_WORDBREAK | DT_NOPREFIX);
+    /* footer, left of the buttons */
+    text_at(dc, g_font_small, C_OFF, COL_X, BUTTON_Y + 9, L"No game data comes with Setup.");
     DeleteObject(gold);
-    SelectObject(dc, g_font_sub);
-    SetTextColor(dc, RGB(0xC9, 0xCB, 0xD3));
-    static const wchar_t sub[] = P_GAME L" on PC: setup";
-    TextOutW(dc, S(26), S(90), sub, (int)wcslen(sub));
+
+    BitBlt(out, 0, 0, cr.right, cr.bottom, dc, 0, 0, SRCCOPY);
+    SelectObject(dc, old_buf);
+    DeleteObject(buf);
+    DeleteDC(dc);
 }
 
 static void paint(HWND h) {
@@ -536,20 +748,28 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_PAINT: paint(h); return 0;
     case WM_PRINTCLIENT: paint_dc(h, (HDC)wp); return 0;
     case WM_ERASEBKGND: return 1;
-    case WM_CTLCOLORSTATIC: {
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORSTATIC: {       /* (a disabled text box asks with WM_CTLCOLORSTATIC) */
         HDC dc = (HDC)wp;
-        int id = GetDlgCtrlID((HWND)lp);
-        SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-        SetTextColor(dc, id == ID_HINT_ROM || id == ID_HINT_FOOT || id == ID_HINT_BIOS ? RGB(0x6B, 0x6E, 0x78) :
-                         id == ID_STATUS && g_state == 3 ? RGB(0xC0, 0x30, 0x30) : GetSysColor(COLOR_WINDOWTEXT));
-        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+        SetBkColor(dc, C_FIELD);
+        SetTextColor(dc, C_TEXT);
+        return (LRESULT)g_br_field;
     }
+    case WM_DRAWITEM: draw_item((const DRAWITEMSTRUCT *)lp); return TRUE;
+    case DM_GETDEFID: return MAKELONG(ID_GO, DC_HASDEFID);      /* Enter presses Install / Play */
     case WM_COMMAND:
+        if ((HIWORD(wp) == EN_SETFOCUS || HIWORD(wp) == EN_KILLFOCUS) && lp) {   /* the field's gold outline */
+            InvalidateRect(h, NULL, FALSE);
+            return 0;
+        }
         switch (LOWORD(wp)) {
         case ID_ROM_BROWSE: browse_zip(g_rom, L"Choose your " P_GAME L" ROM (buriki.zip)"); break;
         case ID_BIOS_BROWSE: browse_zip(g_bios, L"Choose your Hyper Neo Geo 64 system ROM (hng64.zip)"); break;
         case ID_DEST_BROWSE: browse_dest(); break;
-        case ID_GO: go(); break;
+        case ID_DESKTOP: g_want_desktop = !g_want_desktop; InvalidateRect(g_desktop, NULL, FALSE); break;
+        case ID_STARTMENU: g_want_startmenu = !g_want_startmenu; InvalidateRect(g_startmenu, NULL, FALSE); break;
+        case ID_GO:
+        case IDOK: go(); break;
         case ID_CANCEL:
         case IDCANCEL:
             if (g_state == 1 && MessageBoxW(h, L"Stop installing?", APP_TITLE, MB_YESNO | MB_ICONQUESTION) != IDYES) break;
@@ -558,8 +778,8 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
     case WM_APP_PROGRESS:
-        SendMessageW(g_progress, PBM_SETPOS, wp, 0);
-        SetWindowTextW(g_status, (wchar_t *)lp);
+        g_pct = (int)wp;
+        set_status((wchar_t *)lp);
         free((void *)lp);
         return 0;
     case WM_APP_DONE: finished((DWORD)wp); return 0;
@@ -573,6 +793,16 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     return DefWindowProcW(h, msg, wp, lp);
+}
+
+/* A dark title bar to match (Windows 10 2004 and later; older versions keep the normal one). */
+static void dark_title_bar(HWND h) {
+    HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+    if (!dwm) return;
+    typedef HRESULT(WINAPI * SetAttr)(HWND, DWORD, LPCVOID, DWORD);
+    SetAttr set = (SetAttr)(void *)GetProcAddress(dwm, "DwmSetWindowAttribute");
+    BOOL on = TRUE;
+    if (set && FAILED(set(h, 20, &on, sizeof on))) set(h, 19, &on, sizeof on);   /* DWMWA_USE_IMMERSIVE_DARK_MODE */
 }
 
 /* a ROM set, if it's lying next to Setup, one folder up, or in Downloads */
@@ -625,11 +855,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
             swprintf(dest, MAX_PATH, L"%ls\\Programs\\%ls", la, P_PRODUCT);
     }
 
-    INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_PROGRESS_CLASS | ICC_STANDARD_CLASSES};
+    INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&icc);
     HDC sdc = GetDC(NULL);
     g_dpi = GetDeviceCaps(sdc, LOGPIXELSY);
     ReleaseDC(NULL, sdc);
+    measure_art();
 
     WNDCLASSW wc = {0};
     wc.lpfnWndProc = wndproc;
@@ -638,11 +869,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
     wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(1));
     wc.lpszClassName = L"BurikiSetup";
     RegisterClassW(&wc);
-    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT r = {0, 0, S(WIN_W), S(BANNER_H + BODY_H)};
+    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
+    RECT r = {0, 0, S(g_win_w), S(WIN_H)};
     AdjustWindowRect(&r, style, FALSE);
     g_wnd = CreateWindowW(L"BurikiSetup", APP_TITLE, style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left,
                           r.bottom - r.top, NULL, NULL, inst, NULL);
+    dark_title_bar(g_wnd);
     create_controls();
     SetWindowTextW(g_rom, rom);
     SetWindowTextW(g_bios, bios);
@@ -665,6 +897,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
         return 0;
     }
     if (g_silent) go();
+    else SetFocus(g_go);
 
     MSG m;
     while (GetMessageW(&m, NULL, 0, 0) > 0) {
