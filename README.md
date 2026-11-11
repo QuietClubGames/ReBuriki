@@ -28,7 +28,7 @@ An unofficial PC version of SNK's 1999 Hyper Neo Geo 64 arcade fighter.
 | **English or Japanese** | Choose the board's region from the menu. |
 | **Controllers** | Xbox-style controllers for two players, keyboard, and remapping for both. |
 | **Arcade settings** | Free play, difficulty, attack power, timer speed and more from an in-game menu, plus an option to have the hidden fighter Silber from the start. |
-| **Online play** | Two players over the internet or a home network, with rollback so it stays responsive on an ordinary connection. See [Playing online](#playing-online). |
+| **Online play (experimental)** | Two players over the internet or a home network, with rollback so it stays responsive on an ordinary connection. See [Playing online](#playing-online-experimental). |
 | **Native** | Not an emulator: the arcade code is recompiled into a Windows program. |
 
 ## Install
@@ -68,7 +68,7 @@ keyboard. The game pauses while the menu is open.
 | **Controls** | Change any key or controller button, stick dead zone, restore defaults |
 | **Game** | Unlock Silber, free play, language / region (applies after a restart) |
 | **Rules** | The arcade operator's settings: difficulty, attack power and timer speed (1 player and versus), continue, replay, blood, move commands on screen, sound in the title demo |
-| **Online** | Host a game, join one by address, input delay, this PC's address, leave |
+| **Online** | Experimental. Host a game, join one by address, input delay, this PC's address, leave |
 | **System** | Resume, the arcade's operator menu, restart, quit |
 
 ## Controls
@@ -94,7 +94,14 @@ The game's own "How to play" screens show the moves.
 | F2 | The arcade's Test button (operator menu) |
 | 9 | The arcade's Service button |
 
-## Playing online
+## Playing online (experimental)
+
+**This part is experimental.** It has been tested thoroughly with two copies of the game on one PC,
+through simulated slow and unreliable connections, and the two stayed in step every time. It has not
+yet been played much between two real PCs over the internet. It connects the two players' PCs directly:
+there is no server, lobby or matchmaking, so you arrange a game with someone yourselves. Nothing here
+affects ordinary play. If something goes wrong, please report it with `buriki.log` from both players
+(see the FAQ); the game writes a line there if the two sides ever disagree.
 
 Two players, each on their own PC with their own copy of ReBuriki. One hosts and is player 1; the other
 joins and is player 2. Each of you plays with your own Player 1 keys or first controller.

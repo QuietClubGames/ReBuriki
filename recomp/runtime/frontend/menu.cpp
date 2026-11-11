@@ -250,8 +250,8 @@ static const Item k_rules[] = {
 // Online play (netplay.cpp). Hosting and joining restart the game: both players' machines start from power on
 // with the host's settings, which is what keeps them identical.
 static const Item k_online[] = {
-    INFO("Status", "Two players over the internet or a home network, each on their own PC.", info_online),
-    ACTION("Host a game", "You are player 1. The game restarts and waits; the other player chooses Join a game with your address.", act_host, offline),
+    INFO("Status", "Experimental. Two players over the internet or a home network, each on their own PC.", info_online),
+    ACTION("Host a game", "Experimental. You are player 1. The game restarts and waits; the other player joins with your address.", act_host, offline),
     TEXT("Address to join", "The host's address, such as 192.168.1.20. Enter to type it, Ctrl+V to paste.", get_address, set_address, offline),
     ACTION("Join a game", "You are player 2 and play with the host's game settings. The game restarts and connects to that address.", act_join, can_join),
     CHOICE("Input delay", "Frames before the game sees a button press, for both players (the host's choice). Raise it if the picture often jumps.", get_online_delay, set_online_delay, k_delay, offline),

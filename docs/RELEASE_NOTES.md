@@ -23,7 +23,7 @@ What's in it:
 - **Free play** and the arcade operator's rules (difficulty, attack power, timer speed, continue, replay,
   blood and more) from the menu.
 - Xbox-style controllers for two players, keyboard, and remapping for both.
-- **Online play** for two players (menu: Online). One hosts, the other joins by address. It uses
+- **Online play (experimental)** for two players (menu: Online). One hosts, the other joins by address. It uses
   rollback, so your own moves respond at once and the game corrects itself when the other player's
   arrive late.
 

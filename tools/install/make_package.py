@@ -414,6 +414,7 @@ Pages:
   Rules     the arcade operator's settings: difficulty, attack power and timer speed (1 player and
             versus), continue, replay, blood, move commands on screen, sound in the title demo.
             They apply from the next fight and are kept in the arcade's save memory.
+  Online    experimental: host a game, join one by address, input delay, leave (see PLAYING ONLINE)
   System    resume, the arcade's operator menu, restart, quit
 
 Silber, the final boss, is a hidden twelfth fighter ("Original Karate", at the bottom of the style
@@ -427,6 +428,37 @@ put them, or out at the edges of the screen.
 
 Settings are saved in settings.ini, keys and buttons in controls.ini, and the arcade board's own saved
 settings and records in nvram.bin (all in the install folder).
+
+PLAYING ONLINE (EXPERIMENTAL)
+-----------------------------
+This part is experimental. It has been tested thoroughly with two copies of the game on one PC through
+simulated slow and unreliable connections, but not yet much between two real PCs over the internet.
+It connects the two players' PCs directly: there is no server, lobby or matchmaking, so you arrange a
+game with someone yourselves. Nothing here affects ordinary play.
+
+Two players, each on their own PC with their own copy of {product}. Each plays with their own
+Player 1 keys or first controller. The host is player 1 in the game and the joiner player 2.
+
+  Host:    menu > Online > Host a game. The game restarts and shows a waiting screen with your address.
+  Joiner:  menu > Online > Address to join: type the host's address (Enter to start typing, Ctrl+V
+           pastes). Then Join a game.
+
+The game then starts from power on for both, with the host's settings (free play, the rules, Silber).
+Put in a coin, press Start, and the second player pressing Start is "here comes a new challenger".
+To stop, either player chooses Leave the online game. Both go back to ordinary play.
+
+  Same home network: the joiner types the address shown on the host's waiting screen.
+  Over the internet: the joiner needs the host's public address (search the web for "what is my IP"),
+    and the host's router must forward UDP port 7600 to the host's PC. A virtual-LAN tool such as
+    Tailscale, ZeroTier or Radmin VPN avoids the router setup: both players install it, and the joiner
+    types the host's address in that tool.
+  Windows Firewall asks the first time you host. Choose Allow.
+  Both players need the same Language / region (Game page), game files and version of {product}.
+  Pausing pauses both players. The other one sees "Waiting for the other player".
+  Input delay (the host's choice): 2 suits most connections. Raise it if the picture often jumps.
+  With the frame-rate counter on (Display page), the ping is shown next to it.
+
+If something goes wrong online, please report it with buriki.log from both players.
 
 WHAT YOUR PC NEEDS
 ------------------
