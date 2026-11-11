@@ -50,13 +50,14 @@ struct Item {
     int nchoices;
     int lo, hi, step;            // slider
     void (*action)(void);
-    int binding;                 // 0-9: stick up down left right, L, R, buttons 3 4, start, coin (of the player chosen on the page)
+    int binding;                 // which control (FB_* of fe_internal.h: 0-3 stick, 4 5 L R, 6 7 buttons 3 4, 8 start, 9 coin, 10 select, 11 other)
     int (*enabled)(void);
     const char* (*info)(void);
     int (*dyn_count)(void);      // choices that depend on the PC (monitors, graphics cards)
     const char* (*dyn_name)(int);
     const char* (*text_get)(void);   // IT_TEXT: a line the player types
     void (*text_set)(const char*);
+    int (*visible)(void);            // rows that are only there some of the time (the Controls page's three views)
 };
 
 static const UiHost* H;
@@ -90,6 +91,13 @@ static int get_player(void) { return g_ctl_player; }
 static void set_player(int v) { g_ctl_player = v; }
 static int get_stick(void) { return H->get_stick(g_ctl_player); }
 static void set_stick(int v) { H->set_stick(g_ctl_player, v); }
+// The Controls page shows one group of controls at a time, so that it is never a long list.
+static int g_ctl_view;
+static int get_view(void) { return g_ctl_view; }
+static void set_view(int v) { g_ctl_view = v; }
+static int view_fight(void) { return g_ctl_view == 0; }
+static int view_screens(void) { return g_ctl_view == 1; }
+static int view_sticks(void) { return g_ctl_view == 2; }
 
 ACCESS(unlock_silber, unlock_silber)
 
@@ -162,6 +170,7 @@ static const char* const k_filter[] = {"Sharp", "Smooth", "Scanlines"};
 static const char* const k_pacing[] = {"Arcade speed  59.43 Hz", "Display vsync"};
 static const char* const k_player[] = {"Player 1", "Player 2"};
 static const char* const k_stick[] = {"Left stick", "Right stick", "Either stick"};
+static const char* const k_view[] = {"In a fight", "The game's screens, and the cabinet", "Sticks"};
 static const char* const k_offon[] = {"Off", "On"};
 static const char* const k_difficulty[] = {"Easy", "Normal", "Hard", "Hardest"};
 static const char* const k_attack[] = {"Light", "Normal", "Heavy"};
@@ -198,7 +207,9 @@ static const char* name_gpu(int i) { return i == 0 ? "Automatic (fastest)" : H->
 #define BIND(lbl, hlp, n) {IT_BINDING, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, n, nullptr, nullptr, nullptr, nullptr}
 #define INFO(lbl, hlp, fn) {IT_INFO, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, 0, nullptr, fn, nullptr, nullptr}
 
-#define BIND_HELP "Select, then press a key to set the key, or a controller button to add it (or take it off if it's already there)."
+#define BINDV(lbl, hlp, n, vis) {IT_BINDING, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, n, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, vis}
+#define CHOICEV(lbl, hlp, g, s, arr, vis) {IT_CHOICE, lbl, hlp, g, s, arr, NCH(arr), 0, 0, 0, nullptr, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, vis}
+#define SLIDERV(lbl, hlp, g, s, lo, hi, st, vis) {IT_SLIDER, lbl, hlp, g, s, nullptr, 0, lo, hi, st, nullptr, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, vis}
 
 static const Item k_display[] = {
     CHOICE("Display mode", "Borderless keeps alt-tab instant. Exclusive takes over the monitor. Alt+Enter / F11 also switch.", get_display_mode, set_display_mode, k_mode, nullptr),
@@ -220,19 +231,25 @@ static const Item k_audio[] = {
 static const Item k_controls[] = {
     INFO("Controllers", "Xbox controllers: the first one connected is player 1, the second is player 2.", info_controllers),
     CHOICE("Player", "Whose keys and buttons to change. Each row shows the keyboard key, then the controller buttons.", get_player, set_player, k_player, nullptr),
-    BIND("Move left  (L button)", BIND_HELP, 4),
-    BIND("Move right  (R button)", BIND_HELP, 5),
-    CHOICE("Attack stick", "Which stick on the controller works as the arcade's stick, the one that attacks.", get_stick, set_stick, k_stick, nullptr),
-    BIND("Stick up", BIND_HELP, 0),
-    BIND("Stick down", BIND_HELP, 1),
-    BIND("Stick left", BIND_HELP, 2),
-    BIND("Stick right", BIND_HELP, 3),
-    BIND("Start", BIND_HELP, 8),
-    BIND("Insert coin", BIND_HELP, 9),
-    BIND("Button 3", BIND_HELP, 6),
-    BIND("Button 4", BIND_HELP, 7),
-    SLIDER("Stick dead zone", "How far a stick must move before it counts.", get_deadzone, set_deadzone, 10, 90, 5),
-    ACTION("Restore defaults", "Keys: arrows Z X C V 1 5, and R F D G A S Q W 2 6. Pad: LT LB A left, RT RB B right, D-pad or either stick attacks.", act_reset_binds, nullptr),
+    CHOICE("Show", "The controls come in three groups. Choose a row and press Enter to change its key and buttons.", get_view, set_view, k_view, nullptr),
+    // in a fight
+    BINDV("Move left", "Steps left in a fight (the game's L button). It does nothing on the game's other screens: that is Select.", 4, view_fight),
+    BINDV("Move right", "Steps right in a fight (the game's R button). It does nothing on the game's other screens.", 5, view_fight),
+    BINDV("Stick up", "The arcade stick: attacks in a fight, and moves the cursor on the game's screens.", 0, view_fight),
+    BINDV("Stick down", "The arcade stick: attacks in a fight, and moves the cursor on the game's screens.", 1, view_fight),
+    BINDV("Stick left", "The arcade stick: attacks in a fight, and moves the cursor on the game's screens.", 2, view_fight),
+    BINDV("Stick right", "The arcade stick: attacks in a fight, and moves the cursor on the game's screens.", 3, view_fight),
+    // the game's own screens, and the cabinet's buttons
+    BINDV("Select", "Confirms on the game's own screens, such as choosing your fighter. It does nothing in a fight.", 10, view_screens),
+    BINDV("Other button", "The game's second button on its own screens (it confirms as well). It does nothing in a fight.", 11, view_screens),
+    BINDV("Start", "The cabinet's Start button.", 8, view_screens),
+    BINDV("Insert coin", "Puts a coin in. Not needed with Free play on (Game page).", 9, view_screens),
+    BINDV("Button 3", "A spare button of the arcade board. This game shows no use for it.", 6, view_screens),
+    BINDV("Button 4", "A spare button of the arcade board. This game shows no use for it.", 7, view_screens),
+    // sticks
+    CHOICEV("Attack stick", "Which stick on the controller works as the arcade's stick, the one that attacks.", get_stick, set_stick, k_stick, view_sticks),
+    SLIDERV("Stick dead zone", "How far a stick must move before it counts.", get_deadzone, set_deadzone, 10, 90, 5, view_sticks),
+    ACTION("Restore defaults", "Pad: triggers and bumpers move, A selects, D-pad or either stick attacks. Keys: arrows, Z X C V 1 5 (player 2: R F D G, A S Q W 2 6).", act_reset_binds, nullptr),
 };
 static const Item k_game[] = {
     TOGGLE_EN("Unlock Silber", "The hidden twelfth fighter, Original Karate, at the bottom of the style list. Off: locked until earned, as in the arcade.", get_unlock_silber, set_unlock_silber, offline),
@@ -284,7 +301,7 @@ static const Section k_sections[] = {
     {"SYSTEM", k_system, NCH(k_system)},
 };
 #define NSECT 7
-#define MAXROWS 16
+#define MAXROWS 24
 #define VISROWS 11              // rows that fit on the panel; a longer page scrolls to keep the chosen row in view
 
 static int choice_count(const Item* it) { return it->dyn_count ? it->dyn_count() : it->nchoices; }
@@ -308,6 +325,7 @@ static float g_panel_h;                   // animated panel height
 struct Toast { char text[96]; float age; };
 static Toast g_toasts[4];
 
+static const Item* g_cap_item;            // the control whose key and buttons are being changed (the editing box)
 // a line being typed (IT_TEXT)
 static const Item* g_edit;
 static char g_edit_buf[64];
@@ -317,8 +335,9 @@ static char g_dlg_title[64], g_dlg_body[640], g_dlg_key[16], g_dlg_label[64], g_
 
 void ui_init(const UiHost* host) { H = host; }
 
+static int item_visible(const Item* it) { return !it->visible || it->visible(); }
 static int item_enabled(const Item* it) {
-    return it->type != IT_INFO && (!it->enabled || it->enabled());
+    return item_visible(it) && it->type != IT_INFO && (!it->enabled || it->enabled());
 }
 
 static void select_valid(int dir) {
@@ -406,7 +425,7 @@ void ui_key(int key, int device) {
     case UI_NEXT_TAB: g_sect = (g_sect + 1) % NSECT; select_valid(1); break;
     case UI_OK:
         if (it->type == IT_ACTION) it->action();
-        else if (it->type == IT_BINDING) H->start_capture(g_ctl_player * 10 + it->binding);
+        else if (it->type == IT_BINDING) { g_cap_item = it; H->start_capture(g_ctl_player * 16 + it->binding); }
         else if (it->type == IT_TEXT) { g_edit = it; snprintf(g_edit_buf, sizeof g_edit_buf, "%s", it->text_get()); }
         else if (it->type == IT_TOGGLE || it->type == IT_CHOICE) change(it, 1);
         break;
@@ -540,15 +559,21 @@ static void draw_menu(float vw, float vh) {
 
     // rows
     const float y0 = py + 210, rows_bottom = py + Hh - 124;
+    int nvis = 0, sel_vis = 0;      // rows on show, and the chosen row's place among them
+    for (int r = 0; r < s->n; r++) {
+        if (!item_visible(&s->items[r])) continue;
+        if (r == g_row[g_sect]) sel_vis = nvis;
+        nvis++;
+    }
     int top = g_top[g_sect];
-    if (g_row[g_sect] < top) top = g_row[g_sect];
-    if (g_row[g_sect] >= top + VISROWS) top = g_row[g_sect] - VISROWS + 1;
-    if (top > s->n - VISROWS) top = s->n > VISROWS ? s->n - VISROWS : 0;
+    if (sel_vis < top) top = sel_vis;
+    if (sel_vis >= top + VISROWS) top = sel_vis - VISROWS + 1;
+    if (top > nvis - VISROWS) top = nvis > VISROWS ? nvis - VISROWS : 0;
     g_top[g_sect] = top;
-    float target_y = y0 + (float)(g_row[g_sect] - top) * (row_h + gap);
-    if (s->n > VISROWS) {           // a slim bar on the right: where this view is in the list
-        const float th = (float)VISROWS * (row_h + gap) - gap, bh = th * (float)VISROWS / (float)s->n;
-        const float by = y0 + (th - bh) * (float)top / (float)(s->n - VISROWS);
+    float target_y = y0 + (float)(sel_vis - top) * (row_h + gap);
+    if (nvis > VISROWS) {           // a slim bar on the right: where this view is in the list
+        const float th = (float)VISROWS * (row_h + gap) - gap, bh = th * (float)VISROWS / (float)nvis;
+        const float by = y0 + (th - bh) * (float)top / (float)(nvis - VISROWS);
         uip_rect(px + W - 24, y0, 4, th, 2, fade(0xFFFFFF10u, a), fade(0xFFFFFF10u, a), 0, 0, 0);
         uip_rect(px + W - 24, by, 4, bh, 2, fade(COL_GOLD, a * 0.8f), fade(COL_GOLD, a * 0.8f), 0, 0, 0);
     }
@@ -559,10 +584,12 @@ static void draw_menu(float vw, float vh) {
         uip_rect(px + 34, hy, W - 68, row_h, 12, fade(0xE8B64C24u, a), fade(0xE8B64C14u, a), 1, fade(0xE8B64C30u, a), 0);
         uip_rect(px + 34, hy + 10, 4, row_h - 20, 2, fade(COL_GOLD, a), fade(COL_GOLD, a), 0, 0, 0);
     }
-    for (int r = 0; r < s->n; r++) {
+    for (int r = 0, vi = -1; r < s->n; r++) {
         const Item* it = &s->items[r];
-        if (r < top || r >= top + VISROWS) continue;
-        float y = y0 + (float)(r - top) * (row_h + gap);
+        if (!item_visible(it)) continue;
+        vi++;
+        if (vi < top || vi >= top + VISROWS) continue;
+        float y = y0 + (float)(vi - top) * (row_h + gap);
         // while the panel is still growing, rows below its edge fade in
         float ra = (rows_bottom - y) / row_h;
         if (ra <= 0) continue;
@@ -610,15 +637,9 @@ static void draw_menu(float vw, float vh) {
             break;
         }
         case IT_BINDING: {
-            int action = g_ctl_player * 10 + it->binding;
-            if (capturing == action) {
-                float pulse = 0.5f + 0.5f * sinf(g_time * 5.0f);
-                const char* msg = "Press a key or button\xE2\x80\xA6";
-                float w2 = uip_text_w(UI_FONT_SMALL, msg) + 30;
-                uip_rect(rx - w2, cy - 17, w2, 34, 17, fade(0xE8B64C30u + (uint32_t)(pulse * 0x28), a),
-                         fade(0xE8B64C20u, a), 1, fade(COL_GOLD, a * (0.6f + 0.4f * pulse)), 0);
-                text_c(rx - w2 / 2, vcenter(cy - 17, 34, UI_FONT_SMALL), UI_FONT_SMALL, fade(COL_TEXT, a), msg);
-            } else {
+            int action = g_ctl_player * 16 + it->binding;
+            (void)capturing;
+            {
                 // controller buttons on the right (all that are on it), keyboard key to their left
                 float bx = rx;
                 int nb = H->pad_binding_count(action);
@@ -727,6 +748,40 @@ static void draw_dialog(float vw, float vh) {
     }
 }
 
+// The box for changing one control: it stays open while keys and buttons are pressed, and shows what the
+// control has as it changes.
+static void draw_capture(float vw, float vh, int action) {
+    const float W = 860, Hh = 420, px = (vw - W) / 2, py = (vh - Hh) / 2;
+    uip_rect(0, 0, vw, vh, 0, 0x00000060u, 0x00000060u, 0, 0, 0);
+    uip_rect(px - 10, py + 6, W + 20, Hh + 20, 30, 0x00000090u, 0x00000090u, 0, 0, 34);
+    uip_rect(px, py, W, Hh, 20, 0x1B1D27FAu, 0x0E0F15FCu, 1.5f, 0xE8B64C60u, 0);
+    char title[96];
+    snprintf(title, sizeof title, "%s    Player %d", g_cap_item ? g_cap_item->label : "", action / 16 + 1);
+    uip_text(px + 52, py + 40, UI_FONT_HEAD, COL_TEXT, title);
+    uip_rect(px + 54, py + 90, 70, 4, 2, COL_GOLD, COL_GOLD, 0, 0, 0);
+    // what it has now
+    float y = py + 128;
+    uip_text(px + 54, vcenter(y, 44, UI_FONT_BODY), UI_FONT_BODY, COL_TEXT_DIM, "Keyboard");
+    key_glyph(px + 250, y + 22, H->key_binding_name(action), 1);
+    y += 58;
+    uip_text(px + 54, vcenter(y, 44, UI_FONT_BODY), UI_FONT_BODY, COL_TEXT_DIM, "Controller");
+    float bx = px + 250;
+    const int nb = H->pad_binding_count(action);
+    for (int i = 0; i < nb; i++) bx += button_glyph(bx, y + 22, H->pad_binding_at(action, i), 1, 0) + 10;
+    if (!nb) uip_text(bx, vcenter(y, 44, UI_FONT_BODY), UI_FONT_BODY, COL_TEXT_OFF, "nothing");
+    // how
+    y += 70;
+    float pulse = 0.5f + 0.5f * sinf(g_time * 5.0f);
+    uip_rect(px + 54, y + 10, 10, 10, 5, fade(COL_GOLD, 0.3f + 0.7f * pulse), fade(COL_GOLD, 0.3f + 0.7f * pulse), 0, 0, 0);
+    uip_text(px + 78, y, UI_FONT_SMALL, COL_TEXT, "Press a controller button to add it. Press it again to take it off.");
+    uip_text(px + 78, y + 34, UI_FONT_SMALL, COL_TEXT, "Press a key to make it the keyboard key.");
+    float fy = py + Hh - 76;
+    uip_rect(px + 40, fy, W - 80, 1, 0, COL_LINE, COL_LINE, 0, 0, 0);
+    float kw = key_glyph(px + 54, fy + 40, "Esc", 1);
+    uip_text(px + 54 + kw + 12, vcenter(fy + 24, 32, UI_FONT_SMALL), UI_FONT_SMALL, COL_TEXT_DIM,
+             "Done      (or just wait: it closes by itself)");
+}
+
 static void draw_notice(float vw) {
     float w = uip_text_w(UI_FONT_SMALL, g_notice) + 78, h = 46, x = (vw - w) / 2, y = 34;
     float k = 0.5f + 0.5f * sinf(g_time * 4.0f);
@@ -762,6 +817,7 @@ void ui_draw(float vw, float vh, float fps) {
     }
     if (g_notice[0] && !g_dlg) draw_notice(vw);
     if (ui_menu_visible()) draw_menu(vw, vh);
+    if (ui_menu_visible() && H && H->capturing() >= 0) draw_capture(vw, vh, H->capturing());
     if (g_dlg) draw_dialog(vw, vh);
     draw_toasts(vw, vh);
 }

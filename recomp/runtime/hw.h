@@ -25,6 +25,11 @@ void hw_report(void);                  // prints the hardware access summary
 // Takes effect the next time the player select screen starts. Off = the arcade's own rule.
 void hw_set_unlock_silber(bool on);
 bool hw_get_unlock_silber(void);
+// True while a fight is being fought (from the bell to the finish), false on every other screen: the title,
+// the select screens, the walk-in, the judgment. For the controls (fe_input.cpp): the game's L and R buttons
+// step left and right in a fight and confirm everywhere else, and the player can have different buttons for
+// the two jobs.
+bool hw_fight_in_progress(void);
 // The arcade's own operator settings (Test menu: GAME OPTIONS and COIN/CREDIT SETTING), for the pause menu's
 // Game and Rules pages. Values are the game's own numbers (hw.cpp has the table).
 enum HwGameOption { GOPT_FREE_PLAY, GOPT_DIFFICULTY, GOPT_DEMO_SOUND, GOPT_COMMAND_DISPLAY, GOPT_ATTACK_CPU,

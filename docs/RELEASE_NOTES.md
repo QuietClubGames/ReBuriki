@@ -24,7 +24,8 @@ What's in it:
   blood and more) from the menu.
 - Xbox-style controllers for two players, keyboard, and remapping for both. The controller layout is
   made for this game: triggers and bumpers step left and right, A selects, the D-pad or either stick
-  attacks. Each control can have up to three buttons.
+  attacks. Stepping and selecting are separate controls (on the cabinet one button did both), each
+  control can have up to three buttons, and a button can be on several controls.
 - **Online play (experimental)** for two players (menu: Online). One hosts, the other joins by address. It uses
   rollback, so your own moves respond at once and the game corrects itself when the other player's
   arrive late.

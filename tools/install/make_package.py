@@ -370,24 +370,32 @@ alone is enough.
 Buriki One plays differently from most fighting games: the buttons move your fighter and the stick
 attacks. The game's own "How to play" screens show the moves for each fighter.
 
-The game uses two buttons, which it calls L and R: step left and step right. The L button also
-confirms on the game's own screens.
+The game uses two buttons, which it calls L and R: in a fight they step left and step right. On the
+cabinet the same two buttons also confirm on the game's own screens, such as choosing your fighter.
+{product} treats the two jobs as separate controls, so a trigger doesn't pick a fighter and A doesn't
+step.
 
 CONTROLLER (Xbox-style; the first controller is player 1, the second player 2)
 ----------
-  Stick (attacks)         D-pad, or either stick
-  Move left  (L button)   LT, LB or A   (so A picks your fighter)
-  Move right (R button)   RT, RB or B
-  Buttons 3 and 4         X, Y   (spare)
-  Start                   Start (Menu)
-  Insert coin             Back (View)
+  In a fight
+    Stick (attacks)       D-pad, or either stick
+    Move left             LT or LB
+    Move right            RT or RB
+  On the game's screens
+    Move the cursor       D-pad, or either stick
+    Select                A
+    Other button          B
+  The cabinet
+    Start                 Start (Menu)
+    Insert coin           Back (View)
+    Buttons 3 and 4       X, Y   (spare)
   Menu                    Back + Start together
 
 KEYBOARD
 --------
                      Player 1           Player 2
   Stick              arrow keys         R F D G  (up, down, left, right)
-  Move left / right  Z  X               A  S
+  Move left / right  Z  X               A  S     (and Select / Other on the game's screens)
   Buttons 3 and 4    C  V               Q  W
   Start              1                  2
   Insert coin        5                  6
@@ -398,10 +406,12 @@ KEYBOARD
   F2                 the arcade's Test button (operator menu: its other settings, tests, records)
   9                  the arcade's Service button
 
-Every key and controller button can be changed in the menu's Controls page. A control can have up
-to three controller buttons: select its row and press a button to add it, or one that is already there
-to take it off. A stick direction can go on a button too. "Attack stick" chooses the left stick, the
-right stick, or either.
+Every key and controller button can be changed in the menu's Controls page. "Show" switches between
+its three groups: in a fight; the game's screens and the cabinet; sticks. Choose a control and press
+Enter (A on a controller) to open its box: press a controller button to add it and again to take it
+off (up to three), or press a key to make it the keyboard key. The same key or button can be on several
+controls: put A on Move left as well if you want it to do both jobs, the way the cabinet did. A stick
+direction can go on a button too. "Attack stick" chooses the left stick, the right stick, or either.
 
 THE MENU
 --------

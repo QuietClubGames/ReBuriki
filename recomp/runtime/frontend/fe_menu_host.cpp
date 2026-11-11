@@ -219,17 +219,11 @@ static void keyboard(void) {
             ui_toast(g_settings.enhanced ? "Enhanced graphics" : "Original arcade graphics");
             continue;
         }
-        if (g_capture >= 0) {                         // remapping: Esc cancels, the next other key is taken
+        if (g_capture >= 0) {                         // the editing box: Esc or Enter closes it, another key becomes the key
             if (repeat) continue;
-            if (vk == VK_ESCAPE) { g_capture = -1; ui_toast("Remapping cancelled"); continue; }
-            char b[64];
-            if (bind_set_key(g_capture, vk)) {
-                snprintf(b, sizeof b, "Assigned to %s", bind_key_name(g_capture));
-                g_capture = -1;
-            } else {
-                snprintf(b, sizeof b, "That key is kept for the menu and hotkeys");
-            }
-            ui_toast(b);
+            if (vk == VK_ESCAPE || vk == VK_RETURN) { g_capture = -1; continue; }
+            g_capture_t = 0;
+            if (!bind_set_key(g_capture, vk)) ui_toast("That key is kept for the menu and hotkeys");
             continue;
         }
         if (!ui_menu_visible() || !ui_menu_wants_pause()) {
@@ -293,12 +287,11 @@ static void controller(float dt) {
             if (r > 0) snprintf(b, sizeof b, "%s added", pad_src_name(src));
             else if (r == 0) snprintf(b, sizeof b, "%s taken off", pad_src_name(src));
             else snprintf(b, sizeof b, "Three buttons at most: press one of them to take it off");
-            ui_toast(b);
-            g_capture = -1;
+            if (r < 0) ui_toast(b);
+            g_capture_t = 0;                      // the box stays open for more
             g_combo_latched = true;               // don't treat this press as anything else
-        } else if (g_capture_t > 6.0f) {
-            g_capture = -1;
-            ui_toast("Remapping cancelled");
+        } else if (g_capture_t > 8.0f) {
+            g_capture = -1;                       // nothing pressed for a while: done
         }
         g_prev_held = held;
         return;

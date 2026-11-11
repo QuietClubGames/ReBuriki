@@ -384,7 +384,7 @@ static void menu_test_tick() {
         if (idx >= 0) {
             ui_menu_set_page(idx);
             ui_menu_toggle(dev);
-            if (capture) { ui_key(UI_DOWN, dev); ui_key(UI_OK, dev); }   // "Player" -> "Button 1", start remapping
+            if (capture) { ui_key(UI_DOWN, dev); ui_key(UI_DOWN, dev); ui_key(UI_OK, dev); }   // "Player" -> "Show" -> "Move left": its editing box
         } else if (!strcmp(page, "toast")) {
             ui_toast("Controller 1 connected");
         }

@@ -1038,3 +1038,64 @@ useful on A. Now (`fe_input.cpp`):
   loads and saves back unchanged (`BURIKI_TEST_SAVE=1` lets a `--test-keys` run write its files).
 - The Controls page has 15 rows now, so menu pages scroll (`VISROWS`, a slim bar on the right).
 - Not tested with a real controller in this session: the screenshots and the file round trip only.
+
+## Controls: Select apart from Move, and a page in three groups (2026-11-11)
+
+Asked for by the user: on the cabinet the L button steps left in a fight and also confirms on
+the game's own screens. They wanted the two jobs on different buttons (A selects, triggers move),
+with the old way still possible, and a Controls page that is not one long list.
+
+### How the game says a fight is on
+
+`0x800F3A51`, one hex digit per side (found by comparing 89 RAM dumps labelled from pictures,
+then watched through 30,000 frames with the new `BURIKI_WATCH=ADDR[,ADDR]`, which prints a byte
+whenever it changes):
+
+| Value | When |
+|---|---|
+| 00 | no fight: title, attract, one-player select |
+| 44 | a challenger has joined and is choosing |
+| 11 | setting up (43 frames) |
+| 22 | the walk-in and READY (120 frames) |
+| 33 | fighting |
+| 77 | a break in the fight (98 frames), then 33 again |
+| 55 | over: the finish, JUDGMENT, CONTINUE? |
+
+`hw_fight_in_progress()` is true for 3 and 7. Demo fights count too, which does not matter.
+
+Also found: the R button confirms on PLAYER SELECT as the L button does.
+
+### The split (`fe_read_host`)
+
+Two more controls per player, `FB_SELECT` and `FB_OTHER` ("select", "other" in controls.ini).
+The arcade's L button gets Move left in a fight and Select on every other screen; R gets Move
+right or Other. Everything else passes straight through. Defaults: Move = LT LB / RT RB, Select
+= A, Other = B; on the keyboard the same two keys do both jobs (Z X, and A S for player 2).
+A key or button may now be on several controls (yesterday's one-job rule is gone).
+
+Because the choice is made when the controls are read, before they become the arcade's bits,
+online play and input scripts are unaffected: both deal in the arcade's bits.
+
+Checked with `BURIKI_TEST_HOLD="1600-1606:select,..."`, which holds named controls of player 1
+as a bound key would:
+
+| | Result |
+|---|---|
+| Select on PLAYER SELECT | fighter chosen |
+| Move left on PLAYER SELECT | nothing |
+| Select or Other held in a fight | RAM identical to nothing pressed |
+| Move left / Move right held in a fight | RAM differs (they act) |
+
+controls.ini from yesterday's build: Select and Other keys follow the L and R keys; if L and R
+still had LT LB A / RT RB B, A and B come off them. Tested, with a changed player 2 kept.
+
+### The page
+
+- **Show** switches between three groups, each short enough to need no scrolling: In a fight
+  (Move left, Move right, Stick up / down / left / right), The game's screens and the cabinet
+  (Select, Other button, Start, Insert coin, Button 3, Button 4), Sticks (Attack stick, dead
+  zone). Rows have a `visible` test; layout goes by place among the visible rows.
+- Enter on a control opens a box that stays open (`draw_capture`): it shows the key and the
+  controller buttons as they change; a button toggles, a key becomes the key, Esc or Enter
+  closes, and it closes by itself after 8 s without a press (for controller-only players).
+- Not tried with a real controller in this session.

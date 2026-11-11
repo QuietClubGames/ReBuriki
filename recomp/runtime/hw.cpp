@@ -364,6 +364,15 @@ void hw_write16(uint32_t a, uint16_t v) { access_write(a, v, 2); }
 void hw_write8(uint32_t a, uint8_t v)   { access_write(a, v, 1); }
 
 bool hw_get_unlock_silber(void) { return g_unlock_silber; }
+
+// The game's fight state, one hex digit per side, at 0x800F3A51 (found by watching it through whole games
+// with BURIKI_WATCH; NOTES.md, "Controls"): 0 no fight, 4 a challenger choosing, 1 setting up, 2 the walk-in
+// and READY, 3 fighting, 7 a break in the fight (98 frames, then 3 again), 5 over.
+bool hw_fight_in_progress(void) {
+    const uint8_t v = g_ram[0x000F3A51 ^ 3];
+    const int a = v >> 4, b = v & 15;
+    return a == 3 || a == 7 || b == 3 || b == 7;
+}
 void hw_set_unlock_silber(bool on) {
     g_unlock_silber = on;
     if (!g_ram) return;
@@ -529,7 +538,33 @@ void hw_note_nan(const char* func, void* vctx) {
 //   BURIKI_POKE=f0-f1:ADDR=VV;...  on frames f0..f1 write the hex byte VV to RAM address ADDR (hex,
 //                                  with or without the 0x80000000; 1F80xxxx = the save memory). More than two hex digits: 16 or
 //                                  32 bits, big-endian. Changes the game: for experiments only.
+// BURIKI_WATCH=ADDR[,ADDR...] (hex, main RAM): prints a line whenever one of those bytes has changed at the
+// end of a frame. For finding out what a variable of the game's means.
+static void hw_watch_frame() {
+    static std::vector<uint32_t> addrs;
+    static std::vector<int> last;
+    static bool init = false;
+    if (!init) {
+        init = true;
+        if (const char* e = getenv("BURIKI_WATCH")) {
+            std::string t = e;
+            for (size_t pos = 0; pos < t.size();) {
+                size_t c = t.find(',', pos);
+                if (c == std::string::npos) c = t.size();
+                const uint32_t a = (uint32_t)strtoul(t.substr(pos, c - pos).c_str(), nullptr, 16) & 0x00FFFFFFu;
+                if (a < HW_RAM_SIZE) { addrs.push_back(a); last.push_back(-1); }
+                pos = c + 1;
+            }
+        }
+    }
+    for (size_t i = 0; i < addrs.size(); i++) {
+        const int v = g_ram[addrs[i] ^ 3];
+        if (v != last[i]) { fprintf(stderr, "[watch] frame %u: %08X = %02X\n", g_frame, 0x80000000u | addrs[i], v); last[i] = v; }
+    }
+}
+
 static void hw_debug_frame() {
+    hw_watch_frame();
     struct Poke { uint32_t f0, f1, addr, val; int bytes; };
     static std::vector<uint32_t> dump_frames;
     static std::string dump_dir;

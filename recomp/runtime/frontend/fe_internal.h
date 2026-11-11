@@ -76,7 +76,11 @@ bool video_focused(void);
 #define KEY_REPEAT 0x10000
 
 // ---- controls (fe_input.cpp) ----
-enum { FB_UP, FB_DOWN, FB_LEFT, FB_RIGHT, FB_B1, FB_B2, FB_B3, FB_B4, FB_START, FB_COIN, FB_COUNT };
+// A player's controls. The first ten are the arcade's own. The game's L and R buttons (FB_B1, FB_B2) step
+// left and right in a fight and confirm on every other screen; FB_SELECT and FB_OTHER are those same two
+// buttons on the other screens, so that the two jobs can be on different keys and buttons (fe_read_host).
+enum { FB_UP, FB_DOWN, FB_LEFT, FB_RIGHT, FB_B1, FB_B2, FB_B3, FB_B4, FB_START, FB_COIN,
+       FB_SELECT, FB_OTHER, FB_COUNT, FB_ARCADE = FB_SELECT };
 enum { SRC_NONE = 0, SRC_DUP, SRC_DDOWN, SRC_DLEFT, SRC_DRIGHT, SRC_START, SRC_BACK, SRC_LS, SRC_RS,
        SRC_LB, SRC_RB, SRC_A, SRC_B, SRC_X, SRC_Y, SRC_LT, SRC_RT, SRC_COUNT };
 void pad_init(void);
@@ -84,12 +88,13 @@ void pad_poll(void);                       // once per displayed frame
 int  pad_player_connected(int player);
 uint32_t pad_held_all(void);               // SRC_* bits held on any connected pad
 int  pad_stick_dir(void);                  // left stick on any pad: bit0 up, 1 down, 2 left, 3 right
-// remappable actions: player * 10 + FB_* (stick directions, the L and R buttons, buttons 3 and 4, start, coin)
+// remappable actions: player * 16 + FB_*
 const char* bind_pad_name(int action);     // the first controller button on it
 int  bind_pad_count(int action);           // how many controller buttons it has
 const char* bind_pad_at(int action, int i);
 const char* bind_key_name(int action);
 int  bind_toggle_pad(int action, int src); // 1 added, 0 taken off, -1 no room for another
+void bind_clear_pad(int action);
 int  bind_set_key(int action, int vk);     // 0 if that key can't be used
 int  bind_stick(int player);               // which stick is the arcade stick: 0 left, 1 right, 2 either
 void bind_set_stick(int player, int v);
