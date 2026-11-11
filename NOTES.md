@@ -643,7 +643,7 @@ Read from the game's code and confirmed by running it. Addresses are for rev. B.
   edge HUD; quality Performance and Extreme in widescreen; borderless full screen; the GDI
   fallback; sound on; vsync pacing. Missing ROM folder: plain message, exit 3.
 - **Two players:** versus fight in widescreen with the HUD at the edges; both sides mirror.
-- **The user's own install** (`F:\NonSteam\Buriki One\ReBuriki`, the 13:42 build, read-only look
+- **An installed copy** (made with Setup, the 13:42 build, read-only look
   at its logs): 76,200 frames (21 minutes) at a steady 59 fps, no errors. So a click-through
   install with shortcuts and the Apps entry works. That copy predates Silber, the Rules page and
   the edge HUD.
