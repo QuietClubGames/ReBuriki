@@ -4,7 +4,7 @@
 // Controller handling adapted from ReLayer (port/pc/pad_map.c, pad_xinput.c), Copyright (c) 2026 The ReLayer
 // project, MIT License (see LICENSE-ReLayer.txt in this folder). Changes for Buriki One: four buttons, a
 // keyboard binding next to each controller binding, one mapping per player, several controller buttons per
-// control, a choice of which stick is the arcade stick.
+// control, the fight / other screens split, a job for each stick, and ready-made controller schemes.
 #include "fe_internal.h"
 #include "frontend.h"
 #include "../hw.h"
@@ -173,38 +173,69 @@ static bool key_reserved(int vk) {
 
 // ---------------------------------------------------------------- bindings
 // Each of a player's controls (FB_*) has one keyboard key and any number of controller buttons (a set of
-// SRC_* bits; the menu allows up to MAX_PAD_PER). The same key or button may be on several controls. The
-// sticks are separate: `stick` says which of them works as the arcade stick.
-enum { STICK_LEFT, STICK_RIGHT, STICK_EITHER };
+// SRC_* bits; the menu allows up to MAX_PAD_PER). The same key or button may be on several controls.
+// Each stick has a job in a fight: step left and right, be the arcade stick (attack), or nothing.
+//
+// The controller side comes as a scheme: one of three ready-made layouts, or Custom, the player's own.
+// Changing anything while on a ready-made scheme copies it to Custom and switches to that. Custom is kept
+// when another scheme is chosen, so the player can go back to it. The keyboard is the same in every scheme.
+enum { ROLE_MOVES, ROLE_ATTACKS, ROLE_OFF };
+enum { SCHEME_MODERN, SCHEME_CLASSIC, SCHEME_BUTTONS, SCHEME_CUSTOM, SCHEME_COUNT };
 enum { MAX_PAD_PER = 3 };
+struct PadLayout {
+    uint32_t pad[FB_COUNT];
+    int stick[2];              // left, right: ROLE_*
+};
 struct Bindings {
     int key[2][FB_COUNT];
-    uint32_t pad[2][FB_COUNT];
-    int stick[2];              // STICK_*
+    int scheme[2];             // SCHEME_*
+    PadLayout custom[2];
     float deadzone;            // sticks, 0..1 of full deflection
 };
 static Bindings g_b;
 static const char* k_fb_names[FB_COUNT] = {"up", "down", "left", "right", "b1", "b2", "b3", "b4", "start", "coin",
-                                           "select", "other"};
+                                           "select", "other", "guard"};
+static const char* const k_scheme_names[SCHEME_COUNT] = {"modern", "classic", "buttons", "custom"};
+static const char* const k_role_names[3] = {"moves", "attacks", "off"};
+
+// The game only uses two buttons, which it calls L and R. In a fight they step left and right, and held
+// together they raise the guard. On the game's other screens they confirm.
+#define S(x) (1u << (x))
+#define DPAD S(SRC_DUP), S(SRC_DDOWN), S(SRC_DLEFT), S(SRC_DRIGHT)
+static const PadLayout k_presets[3] = {
+    // Modern: the left stick steps, the right stick and the D-pad attack; triggers step too; LB, RB or X guard.
+    {{DPAD, S(SRC_LT), S(SRC_RT), S(SRC_Y), 0, S(SRC_START), S(SRC_BACK), S(SRC_A), S(SRC_B),
+      S(SRC_LB) | S(SRC_RB) | S(SRC_X)}, {ROLE_MOVES, ROLE_ATTACKS}},
+    // Classic: both sticks and the D-pad attack; triggers and bumpers step; X guards (so do both triggers).
+    {{DPAD, S(SRC_LT) | S(SRC_LB), S(SRC_RT) | S(SRC_RB), S(SRC_Y), 0, S(SRC_START), S(SRC_BACK), S(SRC_A), S(SRC_B),
+      S(SRC_X)}, {ROLE_ATTACKS, ROLE_ATTACKS}},
+    // Buttons attack: the left stick and triggers step; Y A X B attack up, down, left, right; LB or RB guard.
+    {{S(SRC_DUP) | S(SRC_Y), S(SRC_DDOWN) | S(SRC_A), S(SRC_DLEFT) | S(SRC_X), S(SRC_DRIGHT) | S(SRC_B),
+      S(SRC_LT), S(SRC_RT), 0, 0, S(SRC_START), S(SRC_BACK), S(SRC_A), S(SRC_B),
+      S(SRC_LB) | S(SRC_RB)}, {ROLE_MOVES, ROLE_ATTACKS}},
+};
+#undef DPAD
+
+static const PadLayout& layout(int pl) {
+    return g_b.scheme[pl] == SCHEME_CUSTOM ? g_b.custom[pl] : k_presets[g_b.scheme[pl]];
+}
+// The layout to change: the player's own, starting from the scheme they were on.
+static PadLayout& editable(int pl) {
+    if (g_b.scheme[pl] != SCHEME_CUSTOM) {
+        g_b.custom[pl] = k_presets[g_b.scheme[pl]];
+        g_b.scheme[pl] = SCHEME_CUSTOM;
+    }
+    return g_b.custom[pl];
+}
 
 static void defaults(Bindings* b) {
-    // (keyboard: the same two keys step in a fight and confirm on the other screens, as on the cabinet)
-    static const int p1[FB_COUNT] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, 'Z', 'X', 'C', 'V', '1', '5', 'Z', 'X'};
-    static const int p2[FB_COUNT] = {'R', 'F', 'D', 'G', 'A', 'S', 'Q', 'W', '2', '6', 'A', 'S'};
+    // (keyboard: the same two keys step in a fight and confirm on the other screens, as on the cabinet;
+    //  both together guard, and player 1 also has Space for that)
+    static const int p1[FB_COUNT] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, 'Z', 'X', 'C', 'V', '1', '5', 'Z', 'X', VK_SPACE};
+    static const int p2[FB_COUNT] = {'R', 'F', 'D', 'G', 'A', 'S', 'Q', 'W', '2', '6', 'A', 'S', 0};
     memcpy(b->key[0], p1, sizeof p1);
     memcpy(b->key[1], p2, sizeof p2);
-    // The game only uses two buttons, which it calls L and R. In a fight they step left and right: the
-    // left and right triggers and bumpers. On the game's other screens they confirm: A and B. X and Y are
-    // the board's spare buttons 3 and 4. The D-pad and either stick attack.
-#define S(x) (1u << (x))
-    static const uint32_t pad[FB_COUNT] = {
-        S(SRC_DUP), S(SRC_DDOWN), S(SRC_DLEFT), S(SRC_DRIGHT),
-        S(SRC_LT) | S(SRC_LB), S(SRC_RT) | S(SRC_RB), S(SRC_X), S(SRC_Y),
-        S(SRC_START), S(SRC_BACK), S(SRC_A), S(SRC_B)};
-#undef S
-    memcpy(b->pad[0], pad, sizeof pad);
-    memcpy(b->pad[1], pad, sizeof pad);
-    b->stick[0] = b->stick[1] = STICK_EITHER;
+    for (int pl = 0; pl < 2; pl++) { b->scheme[pl] = SCHEME_MODERN; b->custom[pl] = k_presets[SCHEME_MODERN]; }
     b->deadzone = 0.35f;
 }
 
@@ -215,15 +246,18 @@ static char* trim(char* s) {
     return s;
 }
 
-static const char* const k_stick_names[] = {"left", "right", "either"};
+static int name_index(const char* v, const char* const* names, int n) {
+    for (int i = 0; i < n; i++) if (!_stricmp(v, names[i])) return i;
+    return -1;
+}
 
-// controls.ini:  p1_b1_key = Z   p1_b1_pad = LT LB A   p1_attack_stick = either   ...   stick_deadzone = 0.35
+// controls.ini:  p1_scheme = modern   p1_b1_key = Z   p1_b1_pad = LT LB   p1_left_stick = moves   ...
+// The _pad and _stick lines are the player's Custom layout, whichever scheme is chosen.
 static void load(Bindings* b, const char* path) {
     FILE* f = fopen(path, "r");
     if (!f) return;
-    bool seen_stick[2] = {false, false}, seen_select[2] = {false, false};
-    bool seen_key[2][FB_COUNT] = {};
-    const Bindings fresh = *b;
+    bool seen_scheme[2] = {}, seen_pad[2][FB_COUNT] = {}, seen_key[2][FB_COUNT] = {};
+    int old_stick[2] = {-1, -1};          // "attack_stick" of earlier versions: 0 left, 1 right, 2 either
     char line[256];
     while (fgets(line, sizeof line, f)) {
         char* h = strchr(line, '#');
@@ -238,19 +272,33 @@ static void load(Bindings* b, const char* path) {
             continue;
         }
         int pl = 0;
-        char what[16], dev[8];
-        if (sscanf(key, "p%d_%15[a-z0-9]_%7s", &pl, what, dev) != 3 || pl < 1 || pl > 2) continue;
-        if (!strcmp(what, "attack") && !strcmp(dev, "stick")) {
-            for (int i = 0; i < 3; i++) if (!_stricmp(val, k_stick_names[i])) { b->stick[pl - 1] = i; seen_stick[pl - 1] = true; }
+        char rest[32];
+        if (sscanf(key, "p%d_%31s", &pl, rest) != 2 || pl < 1 || pl > 2) continue;
+        pl--;
+        if (!strcmp(rest, "scheme")) {
+            const int s = name_index(val, k_scheme_names, SCHEME_COUNT);
+            if (s >= 0) { b->scheme[pl] = s; seen_scheme[pl] = true; }
             continue;
         }
-        int t = -1;
-        for (int k = 0; k < FB_COUNT; k++) if (!strcmp(what, k_fb_names[k])) t = k;
+        if (!strcmp(rest, "left_stick") || !strcmp(rest, "right_stick")) {
+            const int r = name_index(val, k_role_names, 3);
+            if (r >= 0) b->custom[pl].stick[rest[0] == 'r'] = r;
+            continue;
+        }
+        if (!strcmp(rest, "attack_stick")) {
+            static const char* const old[3] = {"left", "right", "either"};
+            old_stick[pl] = name_index(val, old, 3);
+            continue;
+        }
+        char* us = strrchr(rest, '_');
+        if (!us) continue;
+        *us = 0;
+        const char *what = rest, *dev = us + 1;
+        const int t = name_index(what, k_fb_names, FB_COUNT);
         if (t < 0) continue;
-        if (t == FB_SELECT) seen_select[pl - 1] = true;
         if (!strcmp(dev, "key")) {
             int vk = key_from_name(val);
-            if (vk >= 0 && !key_reserved(vk)) { b->key[pl - 1][t] = vk; seen_key[pl - 1][t] = true; }
+            if (vk >= 0 && !key_reserved(vk)) { b->key[pl][t] = vk; seen_key[pl][t] = true; }
             else fe_log("[input] %s: unknown key '%s'", path, val);
         } else if (!strcmp(dev, "pad")) {
             // a list of controller buttons: "LT LB A" (or "none")
@@ -262,33 +310,44 @@ static void load(Bindings* b, const char* path) {
                 if (s < 0) { ok = false; fe_log("[input] %s: unknown controller button '%s'", path, tok); }
                 else if (s != SRC_NONE) mask |= 1u << s;
             }
-            if (ok) b->pad[pl - 1][t] = mask;
+            if (ok) { b->custom[pl].pad[t] = mask; seen_pad[pl][t] = true; }
         }
     }
     fclose(f);
-    // A file from before the controller layout changed (no attack_stick line) that still has that version's
-    // untouched buttons (X Y A B, Start, Back) gets the new layout. Anything the player changed is kept.
-    static const int old_pad[6] = {SRC_X, SRC_Y, SRC_A, SRC_B, SRC_START, SRC_BACK};
+
+    // Files from earlier versions (no scheme line).
     for (int pl = 0; pl < 2; pl++) {
-        if (seen_stick[pl]) continue;
-        bool old = true;
-        for (int i = 0; i < 6; i++) old &= b->pad[pl][FB_B1 + i] == 1u << old_pad[i];
-        if (old) memcpy(b->pad[pl], fresh.pad[pl], sizeof b->pad[pl]);
-    }
-    // A file from before Select and Other existed. Keys: they follow the L and R keys, so the keyboard works
-    // as it did. Controller: if L and R still have that version's untouched buttons (LT LB A, RT RB B), take
-    // A and B off them, since those are Select and Other now.
-    for (int pl = 0; pl < 2; pl++) {
-        if (seen_select[pl]) continue;
+        // Select and Other did not exist once: their keys follow the L and R keys, so the keyboard works as it did.
         if (!seen_key[pl][FB_SELECT]) b->key[pl][FB_SELECT] = b->key[pl][FB_B1];
         if (!seen_key[pl][FB_OTHER]) b->key[pl][FB_OTHER] = b->key[pl][FB_B2];
-        const uint32_t l3 = 1u << SRC_LT | 1u << SRC_LB | 1u << SRC_A, r3 = 1u << SRC_RT | 1u << SRC_RB | 1u << SRC_B;
-        if (b->pad[pl][FB_B1] == l3 && b->pad[pl][FB_B2] == r3) {
-            b->pad[pl][FB_B1] = fresh.pad[pl][FB_B1];
-            b->pad[pl][FB_B2] = fresh.pad[pl][FB_B2];
+        if (seen_scheme[pl]) continue;
+        bool any = false;
+        for (bool s : seen_pad[pl]) any |= s;
+        if (!any) continue;                                  // nothing about the controller: the default scheme
+        PadLayout& c = b->custom[pl];
+        const PadLayout& classic = k_presets[SCHEME_CLASSIC];
+        for (int t = 0; t < FB_COUNT; t++) if (!seen_pad[pl][t]) c.pad[t] = classic.pad[t];
+        c.stick[0] = old_stick[pl] == 1 ? ROLE_OFF : ROLE_ATTACKS;
+        c.stick[1] = old_stick[pl] == 0 ? ROLE_OFF : ROLE_ATTACKS;
+        // A layout that is still one of the earlier versions' untouched defaults becomes the Modern scheme.
+        // Anything the player had changed is kept, as Custom.
+        auto is = [&](int t, uint32_t m) { return c.pad[t] == m; };
+        const bool dpad = is(FB_UP, S(SRC_DUP)) && is(FB_DOWN, S(SRC_DDOWN)) && is(FB_LEFT, S(SRC_DLEFT)) && is(FB_RIGHT, S(SRC_DRIGHT));
+        const bool rest = is(FB_START, S(SRC_START)) && is(FB_COIN, S(SRC_BACK)) && dpad;
+        const uint32_t l3 = S(SRC_LT) | S(SRC_LB) | S(SRC_A), r3 = S(SRC_RT) | S(SRC_RB) | S(SRC_B);
+        const bool v1 = rest && old_stick[pl] < 0 && is(FB_B1, S(SRC_X)) && is(FB_B2, S(SRC_Y)) && is(FB_B3, S(SRC_A)) && is(FB_B4, S(SRC_B));
+        const bool v2 = rest && old_stick[pl] == 2 && is(FB_B1, l3) && is(FB_B2, r3) && is(FB_B3, S(SRC_X)) && is(FB_B4, S(SRC_Y));
+        const bool v3 = rest && old_stick[pl] == 2 && is(FB_B1, S(SRC_LT) | S(SRC_LB)) && is(FB_B2, S(SRC_RT) | S(SRC_RB)) &&
+                        is(FB_B3, S(SRC_X)) && is(FB_B4, S(SRC_Y)) && is(FB_SELECT, S(SRC_A)) && is(FB_OTHER, S(SRC_B));
+        if (v1 || v2 || v3) { b->scheme[pl] = SCHEME_MODERN; c = k_presets[SCHEME_MODERN]; continue; }
+        b->scheme[pl] = SCHEME_CUSTOM;
+        if (!seen_pad[pl][FB_SELECT] && is(FB_B1, l3) && is(FB_B2, r3)) {   // A and B are Select and Other now
+            c.pad[FB_B1] = S(SRC_LT) | S(SRC_LB);
+            c.pad[FB_B2] = S(SRC_RT) | S(SRC_RB);
         }
     }
 }
+#undef S
 
 // The names of the controller buttons in a set, in a fixed order (the order the menu shows them in).
 static int pad_list(uint32_t mask, int* out) {
@@ -303,24 +362,27 @@ static void save(const Bindings* b, const char* path) {
     FILE* f = fopen(path, "w");
     if (!f) return;
     fprintf(f, "# Buriki One controls (also editable in the in-game menu: Controls).\n"
-               "# Keys: A-Z 0-9 up down left right space enter shift ctrl alt num0-num9 f1 ... or vkXX (hex)\n"
+               "# Keys: A-Z 0-9 up down left right space enter shift ctrl alt num0-num9 f1 ... or vkXX (hex), or none\n"
                "# Controller buttons: A B X Y LB RB LT RT START BACK LS RS DUP DDOWN DLEFT DRIGHT NONE;\n"
                "#   several can share one control: p1_b1_pad = LT LB. A key or button can be on several controls.\n"
-               "# b1 and b2 are the game's L and R buttons in a fight (step left, step right); select and other are\n"
-               "#   the same two buttons on the game's other screens (confirm).\n"
-               "# attack_stick: which stick is the arcade stick: left, right or either.\n"
+               "# b1 and b2 are the game's L and R buttons in a fight (step left, step right); guard presses both;\n"
+               "#   select and other are the same two buttons on the game's other screens (confirm).\n"
+               "# scheme: modern, classic, buttons or custom. The _pad and _stick lines are the custom layout.\n"
+               "# left_stick / right_stick, in a fight: moves (steps left and right), attacks, or off.\n"
                "# Fixed: Esc / Tab menu, F2 Test, 9 Service, F11 or Alt+Enter full screen.\n\n");
     for (int pl = 0; pl < 2; pl++) {
+        fprintf(f, "p%d_scheme = %s\n", pl + 1, k_scheme_names[b->scheme[pl] % SCHEME_COUNT]);
         for (int t = 0; t < FB_COUNT; t++) {
             fprintf(f, "p%d_%s_key = %s\n", pl + 1, k_fb_names[t], key_name(b->key[pl][t], false));
             int list[SRC_COUNT];
-            const int n = pad_list(b->pad[pl][t], list);
+            const int n = pad_list(b->custom[pl].pad[t], list);
             fprintf(f, "p%d_%s_pad =", pl + 1, k_fb_names[t]);
             for (int i = 0; i < n; i++)
                 for (auto& k : k_pad_names) if (k.src == list[i]) { fprintf(f, " %s", k.name); break; }
             fprintf(f, n ? "\n" : " none\n");
         }
-        fprintf(f, "p%d_attack_stick = %s\n\n", pl + 1, k_stick_names[b->stick[pl] % 3]);
+        fprintf(f, "p%d_left_stick = %s\n", pl + 1, k_role_names[b->custom[pl].stick[0] % 3]);
+        fprintf(f, "p%d_right_stick = %s\n\n", pl + 1, k_role_names[b->custom[pl].stick[1] % 3]);
     }
     fprintf(f, "stick_deadzone = %.2f\n", b->deadzone);
     fclose(f);
@@ -335,37 +397,46 @@ static int action_pl(int action) { return action / 16 & 1; }
 static int action_fb(int action) { const int t = action % 16; return t < FB_COUNT ? t : 0; }
 int bind_pad_count(int action) {
     int list[SRC_COUNT];
-    return pad_list(g_b.pad[action_pl(action)][action_fb(action)], list);
+    return pad_list(layout(action_pl(action)).pad[action_fb(action)], list);
 }
 const char* bind_pad_at(int action, int i) {
     int list[SRC_COUNT];
-    const int n = pad_list(g_b.pad[action_pl(action)][action_fb(action)], list);
+    const int n = pad_list(layout(action_pl(action)).pad[action_fb(action)], list);
     return i >= 0 && i < n ? pad_src_name(list[i]) : pad_src_name(SRC_NONE);
 }
 const char* bind_pad_name(int action) { return bind_pad_at(action, 0); }
 const char* bind_key_name(int action) { return key_name(g_b.key[action_pl(action)][action_fb(action)], true); }
 // A controller button pressed while remapping: one that is already on this control comes off it; another is
-// added. 1 added, 0 taken off, -1 the control is full.
+// added. 1 added, 0 taken off, -1 the control is full. (The scheme becomes Custom.)
 int bind_toggle_pad(int action, int src) {
-    uint32_t* row = g_b.pad[action_pl(action)];
+    const int pl = action_pl(action), t = action_fb(action);
     const uint32_t bit = 1u << src;
-    const int t = action_fb(action);
-    if (row[t] & bit) { row[t] &= ~bit; bind_save(); return 0; }
     int list[SRC_COUNT];
-    if (pad_list(row[t], list) >= MAX_PAD_PER) return -1;
-    row[t] |= bit;
+    if (!(layout(pl).pad[t] & bit) && pad_list(layout(pl).pad[t], list) >= MAX_PAD_PER) return -1;
+    uint32_t* row = editable(pl).pad;
+    const int r = row[t] & bit ? 0 : 1;
+    row[t] ^= bit;
     bind_save();
-    return 1;
+    return r;
 }
-void bind_clear_pad(int action) { g_b.pad[action_pl(action)][action_fb(action)] = 0; bind_save(); }
+void bind_clear_pad(int action) { editable(action_pl(action)).pad[action_fb(action)] = 0; bind_save(); }
 int bind_set_key(int action, int vk) {
     if (key_reserved(vk) || vk <= 0 || vk > 255) return 0;
     g_b.key[action_pl(action)][action_fb(action)] = vk;
     bind_save();
     return 1;
 }
-int bind_stick(int player) { return g_b.stick[player & 1]; }
-void bind_set_stick(int player, int v) { g_b.stick[player & 1] = v < 0 || v > 2 ? STICK_EITHER : v; bind_save(); }
+// Sticks: index = player * 2 + (0 left, 1 right); value ROLE_*.
+int bind_stick(int index) { return layout(index / 2 & 1).stick[index & 1]; }
+void bind_set_stick(int index, int v) {
+    editable(index / 2 & 1).stick[index & 1] = v < 0 || v > 2 ? ROLE_ATTACKS : v;
+    bind_save();
+}
+int bind_scheme(int player) { return g_b.scheme[player & 1]; }
+void bind_set_scheme(int player, int v) {
+    g_b.scheme[player & 1] = v < 0 || v >= SCHEME_COUNT ? SCHEME_MODERN : v;
+    bind_save();
+}
 
 static bool key(int vk) { return vk > 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
@@ -404,30 +475,43 @@ static void stick_bits(int16_t sx, int16_t sy, bool* b) {
 }
 
 // Tests: BURIKI_TEST_HOLD="1600-1606:select,2500-2530:b1,..." holds player 1's named controls (the names
-// controls.ini uses) during those frames, as if a key bound to them were down. Unlike an --input-script,
-// which names the arcade's buttons directly, this goes through the same step that turns the player's
-// controls into the arcade's (the fight / other screens split).
-static void test_hold(bool* raw) {
+// controls.ini uses) during those frames, as if a key bound to them were down; "lsx-" / "lsx+" push the left
+// stick left / right and "rsx-" / "rsx+" the right one. Unlike an --input-script, which names the arcade's
+// buttons directly, this goes through the same step that turns the player's controls into the arcade's.
+static void test_hold(bool* raw, int16_t* lx, int16_t* rx) {
     static const char* spec = getenv("BURIKI_TEST_HOLD");
     if (!spec) return;
     const unsigned frame = hw_frame_number();
     for (const char* p = spec; *p;) {
         unsigned f0 = 0, f1 = 0;
         char name[16] = {0};
-        if (sscanf(p, "%u-%u:%15[a-z0-9]", &f0, &f1, name) == 3 && frame >= f0 && frame < f1)
+        if (sscanf(p, "%u-%u:%15[a-z0-9+-]", &f0, &f1, name) == 3 && frame >= f0 && frame < f1) {
             for (int i = 0; i < FB_COUNT; i++) if (!strcmp(name, k_fb_names[i])) raw[i] = true;
+            if (!strcmp(name, "lsx-")) *lx = -32767;
+            if (!strcmp(name, "lsx+")) *lx = 32767;
+            if (!strcmp(name, "rsx-")) *rx = -32767;
+            if (!strcmp(name, "rsx+")) *rx = 32767;
+        }
         const char* c = strchr(p, ',');
         if (!c) break;
         p = c + 1;
     }
 }
 
-static void pad_bits(const PadRaw* p, int pl, bool* b) {
-    if (!p) return;
-    const uint32_t held = held_sources(p);
-    for (int t = 0; t < FB_COUNT; t++) if (held & g_b.pad[pl][t]) b[t] = true;
-    if (g_b.stick[pl] != STICK_RIGHT) stick_bits(p->lx, p->ly, b);
-    if (g_b.stick[pl] != STICK_LEFT) stick_bits(p->rx, p->ry, b);
+// A player's controller: its buttons, and its sticks. In a fight a stick does its job (steps, or is the
+// arcade stick); on the game's other screens any stick that is not switched off moves the cursor.
+static void pad_bits(const PadLayout& L, uint32_t held, const int16_t sx[2], const int16_t sy[2], bool fight, bool* b) {
+    for (int t = 0; t < FB_COUNT; t++) if (held & L.pad[t]) b[t] = true;
+    for (int s = 0; s < 2; s++) {
+        if (L.stick[s] == ROLE_OFF) continue;
+        if (fight && L.stick[s] == ROLE_MOVES) {
+            const float x = sx[s] / 32767.0f;
+            if (x < -g_b.deadzone) b[FB_B1] = true;
+            if (x > g_b.deadzone) b[FB_B2] = true;
+        } else {
+            stick_bits(sx[s], sy[s], b);
+        }
+    }
 }
 
 void fe_read_host(bool p[2][10], bool* service, bool* test) {
@@ -443,15 +527,20 @@ void fe_read_host(bool p[2][10], bool* service, bool* test) {
             *service = key('9');
             *test = key(VK_F2);
         }
-        for (int pl = 0; pl < 2; pl++) pad_bits(player_pad(pl), pl, raw[pl]);
-        test_hold(raw[0]);
-        // The game's L and R buttons: in a fight they are the two step controls, and on every other screen
-        // they are Select and Other. (So a trigger doesn't pick a fighter, and A doesn't step.)
         const bool fight = hw_fight_in_progress();
         for (int pl = 0; pl < 2; pl++) {
+            const PadRaw* pad = player_pad(pl);
+            int16_t sx[2] = {pad ? pad->lx : (int16_t)0, pad ? pad->rx : (int16_t)0};
+            int16_t sy[2] = {pad ? pad->ly : (int16_t)0, pad ? pad->ry : (int16_t)0};
+            if (pl == 0) test_hold(raw[0], &sx[0], &sx[1]);
+            pad_bits(layout(pl), pad ? held_sources(pad) : 0, sx, sy, fight, raw[pl]);
+        }
+        // The game's L and R buttons: in a fight they are the two step controls (Guard holds both), and on
+        // every other screen they are Select and Other. (So a trigger doesn't pick a fighter, and A doesn't step.)
+        for (int pl = 0; pl < 2; pl++) {
             for (int i = 0; i < FB_ARCADE; i++) p[pl][i] = raw[pl][i];
-            p[pl][FB_B1] = raw[pl][fight ? FB_B1 : FB_SELECT];
-            p[pl][FB_B2] = raw[pl][fight ? FB_B2 : FB_OTHER];
+            p[pl][FB_B1] = fight ? raw[pl][FB_B1] || raw[pl][FB_GUARD] : raw[pl][FB_SELECT];
+            p[pl][FB_B2] = fight ? raw[pl][FB_B2] || raw[pl][FB_GUARD] : raw[pl][FB_OTHER];
         }
     }
     if (g_test_pulse > 0) { g_test_pulse--; *test = true; }

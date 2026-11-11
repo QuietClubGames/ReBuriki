@@ -50,7 +50,7 @@ struct Item {
     int nchoices;
     int lo, hi, step;            // slider
     void (*action)(void);
-    int binding;                 // which control (FB_* of fe_internal.h: 0-3 stick, 4 5 L R, 6 7 buttons 3 4, 8 start, 9 coin, 10 select, 11 other)
+    int binding;                 // which control (FB_* of fe_internal.h: 0-3 stick, 4 5 L R, 6 7 buttons 3 4, 8 start, 9 coin, 10 select, 11 other, 12 guard)
     int (*enabled)(void);
     const char* (*info)(void);
     int (*dyn_count)(void);      // choices that depend on the PC (monitors, graphics cards)
@@ -89,8 +89,12 @@ static void set_deadzone(int v) { H->set_deadzone(v); }
 static int g_ctl_player;        // Controls page: which player's buttons are shown
 static int get_player(void) { return g_ctl_player; }
 static void set_player(int v) { g_ctl_player = v; }
-static int get_stick(void) { return H->get_stick(g_ctl_player); }
-static void set_stick(int v) { H->set_stick(g_ctl_player, v); }
+static int get_lstick(void) { return H->get_stick(g_ctl_player * 2); }
+static void set_lstick(int v) { H->set_stick(g_ctl_player * 2, v); }
+static int get_rstick(void) { return H->get_stick(g_ctl_player * 2 + 1); }
+static void set_rstick(int v) { H->set_stick(g_ctl_player * 2 + 1, v); }
+static int get_scheme(void) { return H->get_scheme(g_ctl_player); }
+static void set_scheme(int v) { H->set_scheme(g_ctl_player, v); }
 // The Controls page shows one group of controls at a time, so that it is never a long list.
 static int g_ctl_view;
 static int get_view(void) { return g_ctl_view; }
@@ -169,8 +173,9 @@ static const char* const k_quality[] = {"Auto (keeps 60 fps)", "Performance  2\x
 static const char* const k_filter[] = {"Sharp", "Smooth", "Scanlines"};
 static const char* const k_pacing[] = {"Arcade speed  59.43 Hz", "Display vsync"};
 static const char* const k_player[] = {"Player 1", "Player 2"};
-static const char* const k_stick[] = {"Left stick", "Right stick", "Either stick"};
-static const char* const k_view[] = {"In a fight", "The game's screens, and the cabinet", "Sticks"};
+static const char* const k_role[] = {"Steps left and right", "Attacks", "Off"};
+static const char* const k_scheme[] = {"Modern", "Classic", "Buttons attack", "Custom"};
+static const char* const k_view[] = {"In a fight", "The game's screens, and the cabinet", "Sticks, and starting over"};
 static const char* const k_offon[] = {"Off", "On"};
 static const char* const k_difficulty[] = {"Easy", "Normal", "Hard", "Hardest"};
 static const char* const k_attack[] = {"Light", "Normal", "Heavy"};
@@ -210,6 +215,7 @@ static const char* name_gpu(int i) { return i == 0 ? "Automatic (fastest)" : H->
 #define BINDV(lbl, hlp, n, vis) {IT_BINDING, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, n, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, vis}
 #define CHOICEV(lbl, hlp, g, s, arr, vis) {IT_CHOICE, lbl, hlp, g, s, arr, NCH(arr), 0, 0, 0, nullptr, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, vis}
 #define SLIDERV(lbl, hlp, g, s, lo, hi, st, vis) {IT_SLIDER, lbl, hlp, g, s, nullptr, 0, lo, hi, st, nullptr, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, vis}
+#define ACTIONV(lbl, hlp, fn, vis) {IT_ACTION, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, fn, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, vis}
 
 static const Item k_display[] = {
     CHOICE("Display mode", "Borderless keeps alt-tab instant. Exclusive takes over the monitor. Alt+Enter / F11 also switch.", get_display_mode, set_display_mode, k_mode, nullptr),
@@ -231,10 +237,12 @@ static const Item k_audio[] = {
 static const Item k_controls[] = {
     INFO("Controllers", "Xbox controllers: the first one connected is player 1, the second is player 2.", info_controllers),
     CHOICE("Player", "Whose keys and buttons to change. Each row shows the keyboard key, then the controller buttons.", get_player, set_player, k_player, nullptr),
-    CHOICE("Show", "The controls come in three groups. Choose a row and press Enter to change its key and buttons.", get_view, set_view, k_view, nullptr),
+    CHOICE("Control scheme", "Ready-made controller layouts. Change any control and this becomes Custom, which is kept for you.", get_scheme, set_scheme, k_scheme, nullptr),
+    CHOICE("Show", "The controls come in three groups. Choose a control and press Enter to change its key and buttons.", get_view, set_view, k_view, nullptr),
     // in a fight
     BINDV("Move left", "Steps left in a fight (the game's L button). It does nothing on the game's other screens: that is Select.", 4, view_fight),
     BINDV("Move right", "Steps right in a fight (the game's R button). It does nothing on the game's other screens.", 5, view_fight),
+    BINDV("Guard", "Raises your guard in a fight. It holds both step buttons for you, which is how the cabinet guards.", 12, view_fight),
     BINDV("Stick up", "The arcade stick: attacks in a fight, and moves the cursor on the game's screens.", 0, view_fight),
     BINDV("Stick down", "The arcade stick: attacks in a fight, and moves the cursor on the game's screens.", 1, view_fight),
     BINDV("Stick left", "The arcade stick: attacks in a fight, and moves the cursor on the game's screens.", 2, view_fight),
@@ -247,9 +255,10 @@ static const Item k_controls[] = {
     BINDV("Button 3", "A spare button of the arcade board. This game shows no use for it.", 6, view_screens),
     BINDV("Button 4", "A spare button of the arcade board. This game shows no use for it.", 7, view_screens),
     // sticks
-    CHOICEV("Attack stick", "Which stick on the controller works as the arcade's stick, the one that attacks.", get_stick, set_stick, k_stick, view_sticks),
+    CHOICEV("Left stick", "What the left stick does in a fight. On the game's other screens a stick moves the cursor.", get_lstick, set_lstick, k_role, view_sticks),
+    CHOICEV("Right stick", "What the right stick does in a fight. On the game's other screens a stick moves the cursor.", get_rstick, set_rstick, k_role, view_sticks),
     SLIDERV("Stick dead zone", "How far a stick must move before it counts.", get_deadzone, set_deadzone, 10, 90, 5, view_sticks),
-    ACTION("Restore defaults", "Pad: triggers and bumpers move, A selects, D-pad or either stick attacks. Keys: arrows, Z X C V 1 5 (player 2: R F D G, A S Q W 2 6).", act_reset_binds, nullptr),
+    ACTIONV("Restore defaults", "Both players back to the Modern scheme and the original keys: arrows, Z X C V 1 5 (player 2: R F D G, A S Q W 2 6).", act_reset_binds, view_sticks),
 };
 static const Item k_game[] = {
     TOGGLE_EN("Unlock Silber", "The hidden twelfth fighter, Original Karate, at the bottom of the style list. Off: locked until earned, as in the arcade.", get_unlock_silber, set_unlock_silber, offline),

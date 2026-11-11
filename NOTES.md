@@ -1099,3 +1099,36 @@ still had LT LB A / RT RB B, A and B come off them. Tested, with a changed playe
   controller buttons as they change; a button toggles, a key becomes the key, Esc or Enter
   closes, and it closes by itself after 8 s without a press (for controller-only players).
 - Not tried with a real controller in this session.
+
+## Controls: schemes, Guard, and sticks that step (2026-11-11)
+
+Asked for by the user: step with the left stick by default, keep the other ways, have a guard
+button that is not "both triggers", ready-made schemes and one fully custom.
+
+- **Guarding, from the game:** holding L and R together raises the guard. Seen in a fight with
+  both held from the bell (fists up in front of the face; `BURIKI_TEST_HOLD` and the picture).
+  The attract mode has no instruction screen to read it from.
+- **Guard** (`FB_GUARD`, "guard" in controls.ini): in a fight it holds L and R. Proven the same
+  as holding both: identical RAM.
+- **Sticks:** each has a job in a fight (`PadLayout::stick`): steps (left / right beyond the dead
+  zone hold L / R; up and down do nothing), attacks (the arcade stick), or off. Outside a fight
+  any stick not switched off moves the cursor. Left stick left / right gives the same RAM as the
+  Move left / right buttons; the right stick the same as the arcade stick.
+- **Schemes** (`k_presets`, per player):
+
+  | | Steps | Attacks | Guard |
+  |---|---|---|---|
+  | Modern (default) | left stick, LT / RT | right stick, D-pad | LB, RB, X |
+  | Classic | LT LB / RT RB | both sticks, D-pad | X |
+  | Buttons attack | left stick, LT / RT | Y A X B, right stick, D-pad | LB, RB |
+  | Custom | the player's | | |
+
+  Select = A and Other = B in all three. Changing a button or a stick's job while on a ready-made
+  scheme copies it to Custom and switches (`editable`). Custom is kept when another scheme is
+  chosen. Keys are outside the schemes; player 1 has Space for Guard.
+- controls.ini: `p1_scheme`, and the `_pad`, `left_stick`, `right_stick` lines are the Custom
+  layout. A file without a scheme line whose buttons are any earlier version's untouched defaults
+  becomes Modern; otherwise it is kept as Custom (tested with one of each).
+- Controls page: Control scheme row; Guard in the fight group; Left stick and Right stick in
+  the third group, which also holds Restore defaults now. Every group still fits without scrolling.
+- Still not tried with a real controller by me.

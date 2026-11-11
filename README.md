@@ -26,7 +26,7 @@ An unofficial PC version of SNK's 1999 Hyper Neo Geo 64 arcade fighter.
 | **Widescreen** | Fights fill a 16:9 screen, up to 21:9, with more of the arena at the sides. The health bars can stay where the arcade put them or sit at the screen edges. |
 | **Your screen, your way** | Window, borderless or exclusive full screen; 4:3, stretched or pixel-perfect scaling; sharp, smooth or scanline filter. |
 | **English or Japanese** | Choose the board's region from the menu. |
-| **Controllers** | Xbox-style controllers for two players, with a layout made for this game (triggers and bumpers move, A selects, and the two don't get in each other's way), keyboard, and remapping for both. |
+| **Controllers** | Xbox-style controllers for two players, with control schemes made for this game (move on the left stick, attack on the right, a guard button, A selects), a fully custom scheme, keyboard, and remapping for both. |
 | **Arcade settings** | Free play, difficulty, attack power, timer speed and more from an in-game menu, plus an option to have the hidden fighter Silber from the start. |
 | **Online play (experimental)** | Two players over the internet or a home network, with rollback so it stays responsive on an ordinary connection. See [Playing online](#playing-online-experimental). |
 | **Native** | Not an emulator: the arcade code is recompiled into a Windows program. |
@@ -65,7 +65,7 @@ keyboard. The game pauses while the menu is open.
 |---|---|
 | **Display** | Window / borderless / exclusive full screen, window size, monitor, picture shape (4:3, stretch, whole-number, widescreen), where the health bars sit in widescreen, enhanced or original graphics, quality, screen filter, frame pacing, graphics card, frame-rate counter |
 | **Audio** | Volume, mute |
-| **Controls** | In three groups (in a fight; the game's screens and the cabinet; sticks): change any key or controller button, up to three buttons per control, which stick attacks, stick dead zone, restore defaults |
+| **Controls** | Control scheme (Modern, Classic, Buttons attack, Custom); then in three groups: change any key or controller button, up to three buttons per control, what each stick does, stick dead zone, restore defaults |
 | **Game** | Unlock Silber, free play, language / region (applies after a restart) |
 | **Rules** | The arcade operator's settings: difficulty, attack power and timer speed (1 player and versus), continue, replay, blood, move commands on screen, sound in the title demo |
 | **Online** | Experimental. Host a game, join one by address, input delay, this PC's address, leave |
@@ -80,37 +80,49 @@ Buriki One plays differently from most fighting games: two buttons move your fig
 attacks. The game calls the buttons L and R: step left and step right. The game's own "How to play"
 screens show the moves.
 
-On the arcade cabinet those same two buttons also confirm on the game's own screens, such as choosing
-your fighter. ReBuriki treats the two jobs as separate controls, so a trigger doesn't pick a fighter
-and A doesn't step:
+Held together, the two buttons raise your guard. On the arcade cabinet they also confirm on the game's
+own screens, such as choosing your fighter. ReBuriki treats stepping, guarding and confirming as separate
+controls, so a trigger doesn't pick a fighter and A doesn't step.
 
-| | Controller | Keyboard (player 1) | Keyboard (player 2) |
+A controller comes with three ready-made **control schemes** (Controls page), and **Custom**, your own:
+
+| | Modern (default) | Classic | Buttons attack |
 |---|---|---|---|
 | **In a fight** | | | |
-| Stick (attacks) | D-pad, or either stick | Arrow keys | R F D G (up, down, left, right) |
-| Move left | LT or LB | Z | A |
-| Move right | RT or RB | X | S |
+| Step left / right | Left stick, or LT / RT | LT, LB / RT, RB | Left stick, or LT / RT |
+| Attack | Right stick, or D-pad | Either stick, or D-pad | Y, A, X, B (up, down, left, right), right stick or D-pad |
+| Guard | LB, RB or X | X, or both triggers | LB or RB |
 | **On the game's screens** | | | |
-| Move the cursor | D-pad, or either stick | Arrow keys | R F D G |
-| Select | A | Z | A |
-| Other button | B | X | S |
+| Move the cursor | Either stick, or D-pad | Either stick, or D-pad | Either stick, or D-pad |
+| Select / other button | A / B | A / B | A / B |
 | **The cabinet** | | | |
-| Start | Start | 1 | 2 |
-| Insert coin | Back | 5 | 6 |
-| Buttons 3 and 4 (spare) | X, Y | C, V | Q, W |
-| Menu | Back + Start | Tab or Esc | |
+| Start / insert coin | Start / Back | Start / Back | Start / Back |
+| Menu | Back + Start | Back + Start | Back + Start |
 
-On the keyboard the same two keys do both jobs, as on the cabinet.
+Modern plays like a modern game: move with the left stick, attack with the right. Classic keeps the
+stick for attacks, as on the cabinet. Buttons attack is for players who would rather press buttons.
 
-All of it can be changed on the menu's Controls page. **Show** switches between the three groups.
+The keyboard is the same in every scheme:
+
+| | Player 1 | Player 2 |
+|---|---|---|
+| Stick (attacks, and the cursor) | Arrow keys | R F D G (up, down, left, right) |
+| Step left / right (and select / other on screens) | Z / X | A / S |
+| Guard | Space, or Z and X together | A and S together |
+| Start / insert coin | 1 / 5 | 2 / 6 |
+| Buttons 3 and 4 (spare) | C, V | Q, W |
+| Menu | Tab or Esc | |
+
+Everything can be changed on the menu's Controls page. **Show** switches between its three groups.
 Choose a control and press Enter (A on a controller) to open its box:
 
 - Press a controller button to add it, and again to take it off. A control can have up to three.
 - Press a key to make it the keyboard key.
-- The same key or button can be on several controls. Put A on Move left as well, for example, if
-  you want it to do both jobs the way the cabinet did.
-- A stick direction can go on a button too, if you would rather attack with buttons.
-- **Attack stick** (in the Sticks group) chooses the left stick, the right stick, or either.
+- The same key or button can be on several controls.
+- Each stick can step left and right, attack, or be switched off (in the Sticks group).
+
+Change anything about the controller and the scheme becomes **Custom**, starting from the scheme you
+were on. Custom is remembered, so you can try another scheme and come back to it.
 
 | Key | Does |
 |---|---|

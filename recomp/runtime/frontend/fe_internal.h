@@ -79,8 +79,9 @@ bool video_focused(void);
 // A player's controls. The first ten are the arcade's own. The game's L and R buttons (FB_B1, FB_B2) step
 // left and right in a fight and confirm on every other screen; FB_SELECT and FB_OTHER are those same two
 // buttons on the other screens, so that the two jobs can be on different keys and buttons (fe_read_host).
+// FB_GUARD holds L and R together in a fight, which is how the game guards.
 enum { FB_UP, FB_DOWN, FB_LEFT, FB_RIGHT, FB_B1, FB_B2, FB_B3, FB_B4, FB_START, FB_COIN,
-       FB_SELECT, FB_OTHER, FB_COUNT, FB_ARCADE = FB_SELECT };
+       FB_SELECT, FB_OTHER, FB_GUARD, FB_COUNT, FB_ARCADE = FB_SELECT };
 enum { SRC_NONE = 0, SRC_DUP, SRC_DDOWN, SRC_DLEFT, SRC_DRIGHT, SRC_START, SRC_BACK, SRC_LS, SRC_RS,
        SRC_LB, SRC_RB, SRC_A, SRC_B, SRC_X, SRC_Y, SRC_LT, SRC_RT, SRC_COUNT };
 void pad_init(void);
@@ -96,8 +97,10 @@ const char* bind_key_name(int action);
 int  bind_toggle_pad(int action, int src); // 1 added, 0 taken off, -1 no room for another
 void bind_clear_pad(int action);
 int  bind_set_key(int action, int vk);     // 0 if that key can't be used
-int  bind_stick(int player);               // which stick is the arcade stick: 0 left, 1 right, 2 either
-void bind_set_stick(int player, int v);
+int  bind_stick(int index);                // index = player * 2 + (0 left, 1 right): 0 steps, 1 attacks, 2 off (in a fight)
+void bind_set_stick(int index, int v);
+int  bind_scheme(int player);              // 0 Modern, 1 Classic, 2 Buttons attack, 3 Custom
+void bind_set_scheme(int player, int v);
 void bind_defaults(void);
 int  bind_deadzone_percent(void);
 void bind_set_deadzone_percent(int p);

@@ -171,7 +171,7 @@ static const UiHost k_host = {
     host_monitor_count, host_monitor_name, host_gpu_count, host_gpu_name, fe_running_region, host_save_info,
     host_online_active, host_online_status, host_local_address, host_online_host, host_online_join, host_online_leave,
     host_online_ping,
-    bind_pad_count, bind_pad_at, bind_stick, bind_set_stick,
+    bind_pad_count, bind_pad_at, bind_stick, bind_set_stick, bind_scheme, bind_set_scheme,
 };
 
 void menu_host_init(void) {

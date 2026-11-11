@@ -60,11 +60,14 @@ struct UiHost {
     void        (*online_join)(void);               // restart and join the game at g_settings.online_address
     void        (*online_leave)(void);              // restart for ordinary play
     int         (*online_ping)(void);               // ms, or -1
-    // controls: every controller button on an action, and which stick is the arcade stick (0 left, 1 right, 2 either)
+    // controls: every controller button on an action; what a stick does in a fight (index = player * 2 +
+    // 0 left / 1 right; 0 steps, 1 attacks, 2 off); the controller scheme (0 Modern, 1 Classic, 2 Buttons attack, 3 Custom)
     int         (*pad_binding_count)(int action);
     const char* (*pad_binding_at)(int action, int index);
-    int         (*get_stick)(int player);
-    void        (*set_stick)(int player, int v);
+    int         (*get_stick)(int index);
+    void        (*set_stick)(int index, int v);
+    int         (*get_scheme)(int player);
+    void        (*set_scheme)(int player, int v);
 };
 
 void ui_init(const UiHost* host);

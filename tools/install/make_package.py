@@ -370,35 +370,42 @@ alone is enough.
 Buriki One plays differently from most fighting games: the buttons move your fighter and the stick
 attacks. The game's own "How to play" screens show the moves for each fighter.
 
-The game uses two buttons, which it calls L and R: in a fight they step left and step right. On the
-cabinet the same two buttons also confirm on the game's own screens, such as choosing your fighter.
-{product} treats the two jobs as separate controls, so a trigger doesn't pick a fighter and A doesn't
-step.
+The game uses two buttons, which it calls L and R: in a fight they step left and step right, and held
+together they raise your guard. On the cabinet the same two buttons also confirm on the game's own
+screens, such as choosing your fighter. {product} treats stepping, guarding and confirming as separate
+controls, so a trigger doesn't pick a fighter and A doesn't step.
 
 CONTROLLER (Xbox-style; the first controller is player 1, the second player 2)
 ----------
-  In a fight
-    Stick (attacks)       D-pad, or either stick
-    Move left             LT or LB
-    Move right            RT or RB
-  On the game's screens
-    Move the cursor       D-pad, or either stick
-    Select                A
-    Other button          B
-  The cabinet
+There are three ready-made control schemes (menu > Controls > Control scheme) and Custom, your own.
+
+  Modern (the default): plays like a modern game
+    Step left / right     left stick, or LT / RT
+    Attack                right stick, or D-pad
+    Guard                 LB, RB or X
+  Classic: the stick attacks, as on the cabinet
+    Step left / right     LT, LB / RT, RB
+    Attack                either stick, or D-pad
+    Guard                 X, or both triggers
+  Buttons attack
+    Step left / right     left stick, or LT / RT
+    Attack                Y A X B (up, down, left, right), right stick or D-pad
+    Guard                 LB or RB
+  In every scheme
+    On the game's screens either stick or the D-pad moves the cursor, A selects, B is the other button
     Start                 Start (Menu)
     Insert coin           Back (View)
-    Buttons 3 and 4       X, Y   (spare)
-  Menu                    Back + Start together
+    Menu                  Back + Start together
 
-KEYBOARD
+KEYBOARD (the same in every scheme)
 --------
-                     Player 1           Player 2
-  Stick              arrow keys         R F D G  (up, down, left, right)
-  Move left / right  Z  X               A  S     (and Select / Other on the game's screens)
-  Buttons 3 and 4    C  V               Q  W
-  Start              1                  2
-  Insert coin        5                  6
+                          Player 1           Player 2
+  Stick                   arrow keys         R F D G  (up, down, left, right)
+  Step left / right       Z  X               A  S     (and Select / Other on the game's screens)
+  Guard                   Space, or Z + X    A + S
+  Buttons 3 and 4         C  V               Q  W     (spare)
+  Start                   1                  2
+  Insert coin             5                  6
 
   Tab / Esc          menu (quit from its System page)
   Alt+Enter, F11     window / full screen
@@ -410,8 +417,9 @@ Every key and controller button can be changed in the menu's Controls page. "Sho
 its three groups: in a fight; the game's screens and the cabinet; sticks. Choose a control and press
 Enter (A on a controller) to open its box: press a controller button to add it and again to take it
 off (up to three), or press a key to make it the keyboard key. The same key or button can be on several
-controls: put A on Move left as well if you want it to do both jobs, the way the cabinet did. A stick
-direction can go on a button too. "Attack stick" chooses the left stick, the right stick, or either.
+controls. Each stick can step left and right, attack, or be switched off.
+Change anything about the controller and the scheme becomes Custom, starting from the scheme you were
+on. Custom is remembered, so you can try another scheme and come back to it.
 
 THE MENU
 --------
@@ -427,7 +435,7 @@ Pages:
             widescreen, enhanced or original graphics, quality, screen filter (sharp / smooth /
             scanlines), frame pacing, graphics card, frame-rate counter
   Audio     volume, mute
-  Controls  change any key or button, which stick attacks, stick dead zone, restore defaults
+  Controls  control scheme; change any key or button; what each stick does; dead zone; restore defaults
   Game      unlock Silber (on by default); free play; language / region: Japan (Japanese), USA or
             World (English), which applies after a restart
   Rules     the arcade operator's settings: difficulty, attack power and timer speed (1 player and
