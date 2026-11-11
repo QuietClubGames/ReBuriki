@@ -487,9 +487,79 @@ To stop, either player chooses Leave the online game. Both go back to ordinary p
 
 If something goes wrong online, please report it with buriki.log from both players.
 
+PICTURE AND GRAPHICS (menu > Display)
+--------------------
+  Graphics         Enhanced redraws the 3D fighters on your graphics card at high resolution. Original
+                   arcade is the board's own 512x448 picture. F9 switches while you play.
+  Quality          Auto picks the sharpest setting your PC holds at full speed and steps down if it
+                   ever can't. The fixed settings run from Performance (2x) to Extreme (8x).
+  Picture shape    Arcade 4:3, stretch to fill, 4:3 at a whole-number scale, or Widescreen (needs
+                   Enhanced graphics; fights only, the flat screens stay 4:3).
+  Screen filter    Sharp pixels, smooth scaling, or arcade-monitor scanlines.
+  Frame pacing     Arcade speed is the board's own 59.43 frames a second. Display vsync is smoother
+                   on a 60 Hz screen but about 1% fast.
+  Display mode     Window, borderless full screen, or exclusive full screen. Alt+Enter / F11 switch.
+
+YOUR FILES (all in the install folder)
+----------
+  settings.ini     the menu's settings
+  controls.ini     keys, controller buttons and schemes (it can be edited by hand)
+  nvram.bin        the arcade's own save memory: operator settings, records, what you have unlocked
+  buriki.log       what happened in the last run (buriki.old.log is the run before)
+  setup.log        what Setup did
+The game sends nothing over the internet except, in an online game, your button presses to the other
+player. To start completely fresh, delete settings.ini, controls.ini and nvram.bin with the game closed.
+To update, install a newer version into the same folder: your settings and saves are kept.
+
 WHAT YOUR PC NEEDS
 ------------------
-Windows 10 or 11 (64-bit) and a graphics card with Direct3D 11.
+Windows 10 or 11 (64-bit) and a graphics card with Direct3D 11. Without Direct3D 11 the game still
+runs, with the original picture and no pause menu.
+A controller must be Xbox-style (XInput). PlayStation controllers work through Steam or a tool such as
+DS4Windows, and many arcade sticks have an XInput mode. The keyboard always works.
+
+IF SOMETHING GOES WRONG
+-----------------------
+Setup says a ROM file is missing or wrong
+  Setup names the file. buriki.zip must be the rev. B set, and hng64.zip must include the I/O board
+  file tmp87ph40an.bin (older MAME sets don't have it). Both must be complete.
+Windows or an antivirus stops Setup
+  Setup is not signed. On "Windows protected your PC" choose "More info", then "Run anyway". If an
+  antivirus removed Setup.exe or something in the "files" folder, restore and allow it (or unzip the
+  download again) and run Setup again. Please don't turn your antivirus off.
+The picture looks wrong, or the 3D is missing
+  Press F9 to switch between Enhanced and Original graphics. If Original looks right and Enhanced
+  doesn't, update your graphics driver. On a PC with two graphics cards, try the other one (Display >
+  Graphics card; it applies after System > Restart game).
+The game runs slowly or stutters
+  Set Quality to Auto or Performance. The frame-rate counter (Display) should read about 59 or 60.
+  If Frame pacing is on Display vsync and your screen is not close to 60 Hz, use Arcade speed.
+The pause menu doesn't open
+  It is drawn with Direct3D 11. On a PC without it the menu can't be shown; settings.ini and
+  controls.ini can still be edited by hand.
+The controller doesn't work, or the buttons are odd
+  The Controls page shows whether each player's controller is connected. Choose a Control scheme
+  there, or Restore defaults.
+There is no sound
+  Check Volume and Mute (Audio page), and that Windows is playing to the right device. The title demo
+  is silent if "Sound in the title demo" is off (Rules page).
+Online: the joiner gets "no answer"
+  The host must be on the waiting screen first. On the same network use the address shown there. Over
+  the internet use the host's public address, and the host's router must forward UDP port 7600 to
+  the host's PC (or both use a virtual-LAN tool). The host must have allowed the game through
+  Windows Firewall.
+Online: "the two players' games differ"
+  Both need the same Language / region (Game page), the same ROM sets and the same version.
+
+KNOWN GAPS
+----------
+  The sound chip's echo effect is not reproduced. The game uses it, but how the chip does it is not
+  documented, and no emulator has it yet.
+  Online play is experimental and connects directly: no lobby, and over the internet the host needs a
+  forwarded port or a virtual-LAN tool.
+  Setup is not code-signed, so Windows warns about it.
+  Windows only.
+Everything else is believed to match the arcade.
 
 REMOVING THE GAME
 -----------------
@@ -499,7 +569,8 @@ It asks whether to keep your settings. Only the game's own files are removed.
 REPORTING A PROBLEM
 -------------------
 Please include buriki.log from the install folder (the run before it is buriki.old.log), and setup.log
-if the problem was with installing.
+if the problem was with installing. For an online problem, the log from both players helps.
+The project's page, with this guide and pictures: https://github.com/QuietClubGames/ReBuriki
 
 The licenses of {product} and of the tools Setup uses are in the "licenses" folder. {product}'s source
 is in files\\source.
