@@ -370,19 +370,25 @@ alone is enough.
 Buriki One plays differently from most fighting games: the buttons move your fighter and the stick
 attacks. The game's own "How to play" screens show the moves for each fighter.
 
+The game uses two buttons, which it calls L and R: step left and step right. The L button also
+confirms on the game's own screens.
+
 CONTROLLER (Xbox-style; the first controller is player 1, the second player 2)
 ----------
-  Stick              D-pad or left stick
-  Buttons 1 2 3 4    X  Y  A  B
-  Start              Start (Menu)
-  Insert coin        Back (View)
-  Menu               Back + Start together
+  Stick (attacks)         D-pad, or either stick
+  Move left  (L button)   LT, LB or A   (so A picks your fighter)
+  Move right (R button)   RT, RB or B
+  Buttons 3 and 4         X, Y   (spare)
+  Start                   Start (Menu)
+  Insert coin             Back (View)
+  Menu                    Back + Start together
 
 KEYBOARD
 --------
                      Player 1           Player 2
   Stick              arrow keys         R F D G  (up, down, left, right)
-  Buttons 1 2 3 4    Z X C V            A S Q W
+  Move left / right  Z  X               A  S
+  Buttons 3 and 4    C  V               Q  W
   Start              1                  2
   Insert coin        5                  6
 
@@ -392,7 +398,10 @@ KEYBOARD
   F2                 the arcade's Test button (operator menu: its other settings, tests, records)
   9                  the arcade's Service button
 
-Every key and controller button can be changed in the menu's Controls page.
+Every key and controller button can be changed in the menu's Controls page. A control can have up
+to three controller buttons: select its row and press a button to add it, or one that is already there
+to take it off. A stick direction can go on a button too. "Attack stick" chooses the left stick, the
+right stick, or either.
 
 THE MENU
 --------
@@ -408,7 +417,7 @@ Pages:
             widescreen, enhanced or original graphics, quality, screen filter (sharp / smooth /
             scanlines), frame pacing, graphics card, frame-rate counter
   Audio     volume, mute
-  Controls  change any key or button ("press the one you want"), stick dead zone, restore defaults
+  Controls  change any key or button, which stick attacks, stick dead zone, restore defaults
   Game      unlock Silber (on by default); free play; language / region: Japan (Japanese), USA or
             World (English), which applies after a restart
   Rules     the arcade operator's settings: difficulty, attack power and timer speed (1 player and

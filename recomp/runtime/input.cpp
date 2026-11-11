@@ -166,7 +166,7 @@ const InputFrame& input_current(void) { return g_frame; }
 void input_print_help(void) {
     fprintf(stderr,
         "[input] Player 1: arrows + Z X C V, start 1, coin 5 | Player 2: R F D G + A S Q W, start 2, coin 6\n"
-        "[input] Service 9, Test F2, Tab / Esc menu | Gamepads: stick/d-pad, X Y A B = buttons 1-4, Start, Back = coin,\n"
+        "[input] Service 9, Test F2, Tab / Esc menu | Gamepads: stick/d-pad, LT LB A = L, RT RB B = R, Start, Back = coin,\n"
         "[input] Back + Start menu (defaults; remap in the menu's Controls page or controls.ini)\n");
 }
 

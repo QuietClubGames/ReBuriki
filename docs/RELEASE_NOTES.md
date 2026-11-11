@@ -22,7 +22,9 @@ What's in it:
 - **Silber**, the hidden twelfth fighter, selectable from the start (it can be turned off).
 - **Free play** and the arcade operator's rules (difficulty, attack power, timer speed, continue, replay,
   blood and more) from the menu.
-- Xbox-style controllers for two players, keyboard, and remapping for both.
+- Xbox-style controllers for two players, keyboard, and remapping for both. The controller layout is
+  made for this game: triggers and bumpers step left and right, A selects, the D-pad or either stick
+  attacks. Each control can have up to three buttons.
 - **Online play (experimental)** for two players (menu: Online). One hosts, the other joins by address. It uses
   rollback, so your own moves respond at once and the game corrects itself when the other player's
   arrive late.

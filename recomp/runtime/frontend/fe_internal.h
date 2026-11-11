@@ -84,11 +84,15 @@ void pad_poll(void);                       // once per displayed frame
 int  pad_player_connected(int player);
 uint32_t pad_held_all(void);               // SRC_* bits held on any connected pad
 int  pad_stick_dir(void);                  // left stick on any pad: bit0 up, 1 down, 2 left, 3 right
-// remappable actions: player * 6 + {0-3 buttons 1-4, 4 start, 5 coin}
-const char* bind_pad_name(int action);
+// remappable actions: player * 10 + FB_* (stick directions, the L and R buttons, buttons 3 and 4, start, coin)
+const char* bind_pad_name(int action);     // the first controller button on it
+int  bind_pad_count(int action);           // how many controller buttons it has
+const char* bind_pad_at(int action, int i);
 const char* bind_key_name(int action);
-void bind_set_pad(int action, int src);
+int  bind_toggle_pad(int action, int src); // 1 added, 0 taken off, -1 no room for another
 int  bind_set_key(int action, int vk);     // 0 if that key can't be used
+int  bind_stick(int player);               // which stick is the arcade stick: 0 left, 1 right, 2 either
+void bind_set_stick(int player, int v);
 void bind_defaults(void);
 int  bind_deadzone_percent(void);
 void bind_set_deadzone_percent(int p);

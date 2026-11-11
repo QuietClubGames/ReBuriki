@@ -26,7 +26,7 @@ An unofficial PC version of SNK's 1999 Hyper Neo Geo 64 arcade fighter.
 | **Widescreen** | Fights fill a 16:9 screen, up to 21:9, with more of the arena at the sides. The health bars can stay where the arcade put them or sit at the screen edges. |
 | **Your screen, your way** | Window, borderless or exclusive full screen; 4:3, stretched or pixel-perfect scaling; sharp, smooth or scanline filter. |
 | **English or Japanese** | Choose the board's region from the menu. |
-| **Controllers** | Xbox-style controllers for two players, keyboard, and remapping for both. |
+| **Controllers** | Xbox-style controllers for two players, with a layout made for this game (triggers and bumpers move, A selects), keyboard, and remapping for both. |
 | **Arcade settings** | Free play, difficulty, attack power, timer speed and more from an in-game menu, plus an option to have the hidden fighter Silber from the start. |
 | **Online play (experimental)** | Two players over the internet or a home network, with rollback so it stays responsive on an ordinary connection. See [Playing online](#playing-online-experimental). |
 | **Native** | Not an emulator: the arcade code is recompiled into a Windows program. |
@@ -65,7 +65,7 @@ keyboard. The game pauses while the menu is open.
 |---|---|
 | **Display** | Window / borderless / exclusive full screen, window size, monitor, picture shape (4:3, stretch, whole-number, widescreen), where the health bars sit in widescreen, enhanced or original graphics, quality, screen filter, frame pacing, graphics card, frame-rate counter |
 | **Audio** | Volume, mute |
-| **Controls** | Change any key or controller button, stick dead zone, restore defaults |
+| **Controls** | Change any key or controller button (up to three buttons per control), which stick attacks, stick dead zone, restore defaults |
 | **Game** | Unlock Silber, free play, language / region (applies after a restart) |
 | **Rules** | The arcade operator's settings: difficulty, attack power and timer speed (1 player and versus), continue, replay, blood, move commands on screen, sound in the title demo |
 | **Online** | Experimental. Host a game, join one by address, input delay, this PC's address, leave |
@@ -76,16 +76,28 @@ keyboard. The game pauses while the menu is open.
 Insert a coin, then press Start. With free play on, Start alone is enough. The first controller is player 1,
 the second is player 2.
 
-Buriki One plays differently from most fighting games: the buttons move your fighter and the stick attacks.
-The game's own "How to play" screens show the moves.
+Buriki One plays differently from most fighting games: two buttons move your fighter and the stick
+attacks. The game calls the buttons L and R: step left and step right. The game's own "How to play"
+screens show the moves.
 
 | | Controller | Keyboard (player 1) | Keyboard (player 2) |
 |---|---|---|---|
-| Stick | D-pad or left stick | Arrow keys | R F D G (up, down, left, right) |
-| Buttons 1 2 3 4 | X Y A B | Z X C V | A S Q W |
+| Stick (attacks) | D-pad, or either stick | Arrow keys | R F D G (up, down, left, right) |
+| Move left (L button) | LT, LB or A | Z | A |
+| Move right (R button) | RT, RB or B | X | S |
+| Buttons 3 and 4 (spare) | X, Y | C, V | Q, W |
 | Start | Start | 1 | 2 |
 | Insert coin | Back | 5 | 6 |
 | Menu | Back + Start | Tab or Esc | |
+
+The L button is also what confirms on the game's own screens, so **A** picks your fighter.
+
+All of it can be changed on the menu's Controls page:
+
+- Each control can have up to three controller buttons. Select a row and press a button to add it;
+  press one that is already there to take it off.
+- A stick direction can go on a button too, if you would rather attack with buttons.
+- **Attack stick** chooses the left stick, the right stick, or either.
 
 | Key | Does |
 |---|---|

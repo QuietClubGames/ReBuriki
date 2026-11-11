@@ -1014,3 +1014,27 @@ every comparison on the way matched. The scripts put in a coin each and play a t
   floating-point maths runs on the host CPU: basic operations only, which should give the same
   results everywhere, and the memory comparison would show it if not).
 - Speed: the I/O board's microcontroller is now the largest part of a replayed frame.
+
+## Controller layout and flexible bindings (2026-11-11)
+
+What the game uses, checked by script: only the L button (button 1, input bit 0x10) confirms on
+PLAYER SELECT; buttons 3 and 4 do not, and show nothing in a fight (they do change later RAM, the
+same way as each other, so the game notices them somehow). L and R step left and right; the stick
+attacks.
+
+The old default (X Y A B = buttons 1 to 4) put the two buttons that matter on X and Y and nothing
+useful on A. Now (`fe_input.cpp`):
+
+- Every one of a player's ten controls (stick up, down, left, right, L, R, buttons 3 and 4, start,
+  coin) has one key and a set of controller buttons (`Bindings::pad`, bits of `SRC_*`; the menu
+  allows three). A controller button belongs to one control at a time.
+- Defaults: L = LT, LB, A. R = RT, RB, B. Buttons 3 and 4 = X, Y. Stick directions = D-pad.
+  `attack_stick` = either (left, right or either stick is the arcade stick).
+- Remapping (Controls page): a key sets the key; a controller button is added, or taken off if it
+  is already on that row (`bind_toggle_pad`).
+- `controls.ini`: `p1_b1_pad = lt lb a`, `p1_up_pad = dup`, `p1_attack_stick = either`. A file
+  from before (no `attack_stick` line) whose buttons are still exactly the old defaults gets the
+  new layout; anything the player had changed is kept. Tested both ways, and that a new file
+  loads and saves back unchanged (`BURIKI_TEST_SAVE=1` lets a `--test-keys` run write its files).
+- The Controls page has 15 rows now, so menu pages scroll (`VISROWS`, a slim bar on the right).
+- Not tested with a real controller in this session: the screenshots and the file round trip only.

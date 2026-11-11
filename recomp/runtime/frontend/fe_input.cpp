@@ -3,7 +3,8 @@
 //
 // Controller handling adapted from ReLayer (port/pc/pad_map.c, pad_xinput.c), Copyright (c) 2026 The ReLayer
 // project, MIT License (see LICENSE-ReLayer.txt in this folder). Changes for Buriki One: four buttons, a
-// keyboard binding next to each controller binding, one mapping per player.
+// keyboard binding next to each controller binding, one mapping per player, several controller buttons per
+// control, a choice of which stick is the arcade stick.
 #include "fe_internal.h"
 #include "frontend.h"
 #include <cctype>
@@ -16,7 +17,7 @@ struct XPad { WORD wButtons; BYTE bLeftTrigger, bRightTrigger; SHORT sThumbLX, s
 struct XState { DWORD dwPacketNumber; XPad Gamepad; };
 typedef DWORD(WINAPI* XInputGetStateFn)(DWORD, XState*);
 
-struct PadRaw { int connected; uint16_t buttons; uint8_t lt, rt; int16_t lx, ly; };
+struct PadRaw { int connected; uint16_t buttons; uint8_t lt, rt; int16_t lx, ly, rx, ry; };
 
 static XInputGetStateFn g_get;
 static PadRaw g_slot[4];
@@ -63,6 +64,8 @@ void pad_poll(void) {
             g_slot[i].rt = st.Gamepad.bRightTrigger;
             g_slot[i].lx = st.Gamepad.sThumbLX;
             g_slot[i].ly = st.Gamepad.sThumbLY;
+            g_slot[i].rx = st.Gamepad.sThumbRX;
+            g_slot[i].ry = st.Gamepad.sThumbRY;
         } else {
             memset(&g_slot[i], 0, sizeof g_slot[i]);
             g_retry[i] = 120;     // look again in about two seconds
@@ -168,11 +171,17 @@ static bool key_reserved(int vk) {
 }
 
 // ---------------------------------------------------------------- bindings
-enum { MAP_B1, MAP_B2, MAP_B3, MAP_B4, MAP_START, MAP_COIN, MAP_COUNT };
+// Each of the ten arcade controls of a player (stick up / down / left / right, the L and R buttons, buttons
+// 3 and 4, start, coin) has one keyboard key and any number of controller buttons (a set of SRC_* bits; the
+// menu allows up to MAX_PAD_PER). A controller button belongs to one control at a time. The sticks are
+// separate: `stick` says which of them works as the arcade stick.
+enum { STICK_LEFT, STICK_RIGHT, STICK_EITHER };
+enum { MAX_PAD_PER = 3 };
 struct Bindings {
     int key[2][FB_COUNT];
-    uint8_t pad[2][MAP_COUNT];
-    float deadzone;            // left stick, 0..1 of full deflection
+    uint32_t pad[2][FB_COUNT];
+    int stick[2];              // STICK_*
+    float deadzone;            // sticks, 0..1 of full deflection
 };
 static Bindings g_b;
 static const char* k_fb_names[FB_COUNT] = {"up", "down", "left", "right", "b1", "b2", "b3", "b4", "start", "coin"};
@@ -182,10 +191,18 @@ static void defaults(Bindings* b) {
     static const int p2[FB_COUNT] = {'R', 'F', 'D', 'G', 'A', 'S', 'Q', 'W', '2', '6'};
     memcpy(b->key[0], p1, sizeof p1);
     memcpy(b->key[1], p2, sizeof p2);
-    // Face buttons in arcade order: X Y on top = buttons 1 2, A B below = buttons 3 4.
-    static const uint8_t pad[MAP_COUNT] = {SRC_X, SRC_Y, SRC_A, SRC_B, SRC_START, SRC_BACK};
+    // The game only uses two buttons, which it calls L and R: step left and step right. They go on the
+    // left and right triggers and bumpers, and on A and B so that A confirms on the game's own screens (the
+    // L button does that). X and Y are the board's spare buttons 3 and 4. The D-pad and either stick attack.
+#define S(x) (1u << (x))
+    static const uint32_t pad[FB_COUNT] = {
+        S(SRC_DUP), S(SRC_DDOWN), S(SRC_DLEFT), S(SRC_DRIGHT),
+        S(SRC_LT) | S(SRC_LB) | S(SRC_A), S(SRC_RT) | S(SRC_RB) | S(SRC_B), S(SRC_X), S(SRC_Y),
+        S(SRC_START), S(SRC_BACK)};
+#undef S
     memcpy(b->pad[0], pad, sizeof pad);
     memcpy(b->pad[1], pad, sizeof pad);
+    b->stick[0] = b->stick[1] = STICK_EITHER;
     b->deadzone = 0.35f;
 }
 
@@ -196,10 +213,14 @@ static char* trim(char* s) {
     return s;
 }
 
-// controls.ini:  p1_b1_key = Z   p1_b1_pad = X   ...   stick_deadzone = 0.35
+static const char* const k_stick_names[] = {"left", "right", "either"};
+
+// controls.ini:  p1_b1_key = Z   p1_b1_pad = LT LB A   p1_attack_stick = either   ...   stick_deadzone = 0.35
 static void load(Bindings* b, const char* path) {
     FILE* f = fopen(path, "r");
     if (!f) return;
+    bool seen_stick[2] = {false, false};
+    const Bindings fresh = *b;
     char line[256];
     while (fgets(line, sizeof line, f)) {
         char* h = strchr(line, '#');
@@ -216,6 +237,10 @@ static void load(Bindings* b, const char* path) {
         int pl = 0;
         char what[16], dev[8];
         if (sscanf(key, "p%d_%15[a-z0-9]_%7s", &pl, what, dev) != 3 || pl < 1 || pl > 2) continue;
+        if (!strcmp(what, "attack") && !strcmp(dev, "stick")) {
+            for (int i = 0; i < 3; i++) if (!_stricmp(val, k_stick_names[i])) { b->stick[pl - 1] = i; seen_stick[pl - 1] = true; }
+            continue;
+        }
         int t = -1;
         for (int k = 0; k < FB_COUNT; k++) if (!strcmp(what, k_fb_names[k])) t = k;
         if (t < 0) continue;
@@ -223,18 +248,38 @@ static void load(Bindings* b, const char* path) {
             int vk = key_from_name(val);
             if (vk >= 0 && !key_reserved(vk)) b->key[pl - 1][t] = vk;
             else fe_log("[input] %s: unknown key '%s'", path, val);
-        } else if (!strcmp(dev, "pad") && t >= FB_B1) {
-            int s = -1;
-            char low[16];
-            size_t i = 0;
-            for (; val[i] && i < sizeof low - 1; i++) low[i] = (char)tolower((unsigned char)val[i]);
-            low[i] = 0;
-            for (auto& n : k_pad_names) if (!strcmp(low, n.name)) s = n.src;
-            if (s >= 0) b->pad[pl - 1][t - FB_B1] = (uint8_t)s;
-            else fe_log("[input] %s: unknown controller button '%s'", path, val);
+        } else if (!strcmp(dev, "pad")) {
+            // a list of controller buttons: "LT LB A" (or "none")
+            uint32_t mask = 0;
+            bool ok = true;
+            for (char* tok = strtok(val, " ,\t"); tok; tok = strtok(nullptr, " ,\t")) {
+                int s = -1;
+                for (auto& n : k_pad_names) if (!_stricmp(tok, n.name)) s = n.src;
+                if (s < 0) { ok = false; fe_log("[input] %s: unknown controller button '%s'", path, tok); }
+                else if (s != SRC_NONE) mask |= 1u << s;
+            }
+            if (ok) b->pad[pl - 1][t] = mask;
         }
     }
     fclose(f);
+    // A file from before the controller layout changed (no attack_stick line) that still has that version's
+    // untouched buttons (X Y A B, Start, Back) gets the new layout. Anything the player changed is kept.
+    static const int old_pad[6] = {SRC_X, SRC_Y, SRC_A, SRC_B, SRC_START, SRC_BACK};
+    for (int pl = 0; pl < 2; pl++) {
+        if (seen_stick[pl]) continue;
+        bool old = true;
+        for (int i = 0; i < 6; i++) old &= b->pad[pl][FB_B1 + i] == 1u << old_pad[i];
+        if (old) memcpy(b->pad[pl], fresh.pad[pl], sizeof b->pad[pl]);
+    }
+}
+
+// The names of the controller buttons in a set, in a fixed order (the order the menu shows them in).
+static int pad_list(uint32_t mask, int* out) {
+    static const int order[] = {SRC_LT, SRC_LB, SRC_RT, SRC_RB, SRC_A, SRC_B, SRC_X, SRC_Y, SRC_DUP, SRC_DDOWN,
+                                SRC_DLEFT, SRC_DRIGHT, SRC_START, SRC_BACK, SRC_LS, SRC_RS};
+    int n = 0;
+    for (int s : order) if (mask & (1u << s)) out[n++] = s;
+    return n;
 }
 
 static void save(const Bindings* b, const char* path) {
@@ -242,19 +287,21 @@ static void save(const Bindings* b, const char* path) {
     if (!f) return;
     fprintf(f, "# Buriki One controls (also editable in the in-game menu: Controls).\n"
                "# Keys: A-Z 0-9 up down left right space enter shift ctrl alt num0-num9 f1 ... or vkXX (hex)\n"
-               "# Controller buttons: A B X Y LB RB LT RT START BACK LS RS DUP DDOWN DLEFT DRIGHT NONE\n"
+               "# Controller buttons: A B X Y LB RB LT RT START BACK LS RS DUP DDOWN DLEFT DRIGHT NONE;\n"
+               "#   several can share one control: p1_b1_pad = LT LB A. b1 and b2 are the game's L and R buttons.\n"
+               "# attack_stick: which stick is the arcade stick: left, right or either.\n"
                "# Fixed: Esc / Tab menu, F2 Test, 9 Service, F11 or Alt+Enter full screen.\n\n");
     for (int pl = 0; pl < 2; pl++) {
         for (int t = 0; t < FB_COUNT; t++) {
             fprintf(f, "p%d_%s_key = %s\n", pl + 1, k_fb_names[t], key_name(b->key[pl][t], false));
-            if (t >= FB_B1) {
-                int src = b->pad[pl][t - FB_B1];
-                const char* n = "none";
-                for (auto& k : k_pad_names) if (k.src == src) { n = k.name; break; }
-                fprintf(f, "p%d_%s_pad = %s\n", pl + 1, k_fb_names[t], n);
-            }
+            int list[SRC_COUNT];
+            const int n = pad_list(b->pad[pl][t], list);
+            fprintf(f, "p%d_%s_pad =", pl + 1, k_fb_names[t]);
+            for (int i = 0; i < n; i++)
+                for (auto& k : k_pad_names) if (k.src == list[i]) { fprintf(f, " %s", k.name); break; }
+            fprintf(f, n ? "\n" : " none\n");
         }
-        fprintf(f, "\n");
+        fprintf(f, "p%d_attack_stick = %s\n\n", pl + 1, k_stick_names[b->stick[pl] % 3]);
     }
     fprintf(f, "stick_deadzone = %.2f\n", b->deadzone);
     fclose(f);
@@ -264,16 +311,43 @@ void bind_defaults(void) { float dz = g_b.deadzone; defaults(&g_b); g_b.deadzone
 void bind_save(void) { if (!g_no_save) save(&g_b, fe_path("controls.ini").c_str()); }
 int bind_deadzone_percent(void) { return (int)lroundf(g_b.deadzone * 100); }
 void bind_set_deadzone_percent(int p) { g_b.deadzone = (float)p / 100.0f; bind_save(); }
-static int action_fb(int action) { return FB_B1 + action % 6; }
-const char* bind_pad_name(int action) { return pad_src_name(g_b.pad[action / 6 & 1][action % 6]); }
-const char* bind_key_name(int action) { return key_name(g_b.key[action / 6 & 1][action_fb(action)], true); }
-void bind_set_pad(int action, int src) { g_b.pad[action / 6 & 1][action % 6] = (uint8_t)src; bind_save(); }
-int bind_set_key(int action, int vk) {
-    if (key_reserved(vk) || vk <= 0 || vk > 255) return 0;
-    g_b.key[action / 6 & 1][action_fb(action)] = vk;
+// Remappable actions: player * 10 + FB_* (stick up, down, left, right, the L and R buttons, buttons 3 and 4,
+// start, coin).
+static int action_pl(int action) { return action / FB_COUNT & 1; }
+static int action_fb(int action) { return action % FB_COUNT; }
+int bind_pad_count(int action) {
+    int list[SRC_COUNT];
+    return pad_list(g_b.pad[action_pl(action)][action_fb(action)], list);
+}
+const char* bind_pad_at(int action, int i) {
+    int list[SRC_COUNT];
+    const int n = pad_list(g_b.pad[action_pl(action)][action_fb(action)], list);
+    return i >= 0 && i < n ? pad_src_name(list[i]) : pad_src_name(SRC_NONE);
+}
+const char* bind_pad_name(int action) { return bind_pad_at(action, 0); }
+const char* bind_key_name(int action) { return key_name(g_b.key[action_pl(action)][action_fb(action)], true); }
+// A controller button pressed while remapping: one that is already on this control comes off it; another is
+// added (and taken off whatever else that player had it on). 1 added, 0 taken off, -1 the control is full.
+int bind_toggle_pad(int action, int src) {
+    uint32_t* row = g_b.pad[action_pl(action)];
+    const uint32_t bit = 1u << src;
+    const int t = action_fb(action);
+    if (row[t] & bit) { row[t] &= ~bit; bind_save(); return 0; }
+    int list[SRC_COUNT];
+    if (pad_list(row[t], list) >= MAX_PAD_PER) return -1;
+    for (int i = 0; i < FB_COUNT; i++) row[i] &= ~bit;
+    row[t] |= bit;
     bind_save();
     return 1;
 }
+int bind_set_key(int action, int vk) {
+    if (key_reserved(vk) || vk <= 0 || vk > 255) return 0;
+    g_b.key[action_pl(action)][action_fb(action)] = vk;
+    bind_save();
+    return 1;
+}
+int bind_stick(int player) { return g_b.stick[player & 1]; }
+void bind_set_stick(int player, int v) { g_b.stick[player & 1] = v < 0 || v > 2 ? STICK_EITHER : v; bind_save(); }
 
 static bool key(int vk) { return vk > 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
@@ -295,14 +369,10 @@ static bool our_process_focused() {
     return pid == GetCurrentProcessId();
 }
 
-static void pad_bits(const PadRaw* p, int pl, bool* b) {
-    if (!p) return;
-    b[FB_UP] |= (p->buttons & 0x0001) != 0;
-    b[FB_DOWN] |= (p->buttons & 0x0002) != 0;
-    b[FB_LEFT] |= (p->buttons & 0x0004) != 0;
-    b[FB_RIGHT] |= (p->buttons & 0x0008) != 0;
-    // left stick: 8 sectors of 45 degrees, so diagonals are as easy as straight directions
-    float x = p->lx / 32767.0f, y = p->ly / 32767.0f;
+// An analogue stick as the arcade's 8-way stick: 8 sectors of 45 degrees, so diagonals are as easy as
+// straight directions.
+static void stick_bits(int16_t sx, int16_t sy, bool* b) {
+    float x = sx / 32767.0f, y = sy / 32767.0f;
     if (sqrtf(x * x + y * y) > g_b.deadzone) {
         float a = atan2f(y, x) * (180.0f / 3.14159265f);   // 0 = right, 90 = up
         int sector = (int)floorf((a + 22.5f) / 45.0f);
@@ -313,7 +383,14 @@ static void pad_bits(const PadRaw* p, int pl, bool* b) {
         if (dy[sector] > 0) b[FB_UP] = true;
         if (dy[sector] < 0) b[FB_DOWN] = true;
     }
-    for (int t = 0; t < MAP_COUNT; t++) if (src_held(g_b.pad[pl][t], p)) b[FB_B1 + t] = true;
+}
+
+static void pad_bits(const PadRaw* p, int pl, bool* b) {
+    if (!p) return;
+    const uint32_t held = held_sources(p);
+    for (int t = 0; t < FB_COUNT; t++) if (held & g_b.pad[pl][t]) b[t] = true;
+    if (g_b.stick[pl] != STICK_RIGHT) stick_bits(p->lx, p->ly, b);
+    if (g_b.stick[pl] != STICK_LEFT) stick_bits(p->rx, p->ry, b);
 }
 
 void fe_read_host(bool p[2][10], bool* service, bool* test) {

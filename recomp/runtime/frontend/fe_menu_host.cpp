@@ -171,6 +171,7 @@ static const UiHost k_host = {
     host_monitor_count, host_monitor_name, host_gpu_count, host_gpu_name, fe_running_region, host_save_info,
     host_online_active, host_online_status, host_local_address, host_online_host, host_online_join, host_online_leave,
     host_online_ping,
+    bind_pad_count, bind_pad_at, bind_stick, bind_set_stick,
 };
 
 void menu_host_init(void) {
@@ -283,13 +284,15 @@ static void controller(float dt) {
     // remapping: the next newly pressed button (not the one that started it)
     if (g_capture >= 0) {
         g_capture_t += dt;
-        uint32_t p = pressed & ~((1u << SRC_DUP) | (1u << SRC_DDOWN) | (1u << SRC_DLEFT) | (1u << SRC_DRIGHT));
+        uint32_t p = pressed;
         if (p) {
             int src = 0;
             while (!(p & (1u << src))) src++;
-            bind_set_pad(g_capture, src);
-            char b[64];
-            snprintf(b, sizeof b, "Assigned to %s", pad_src_name(src));
+            const int r = bind_toggle_pad(g_capture, src);
+            char b[96];
+            if (r > 0) snprintf(b, sizeof b, "%s added", pad_src_name(src));
+            else if (r == 0) snprintf(b, sizeof b, "%s taken off", pad_src_name(src));
+            else snprintf(b, sizeof b, "Three buttons at most: press one of them to take it off");
             ui_toast(b);
             g_capture = -1;
             g_combo_latched = true;               // don't treat this press as anything else

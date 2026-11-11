@@ -71,7 +71,8 @@ static std::string g_running_bios = "brom1.bin";
 
 void fe_init(const FeOptions& opt) {
     g_opt = opt;
-    g_no_save = opt.no_save || opt.menu_test;
+    // (BURIKI_TEST_SAVE=1: a test run with simulated key presses that should write its settings files)
+    g_no_save = (opt.no_save || opt.menu_test) && !getenv("BURIKI_TEST_SAVE");
     settings_defaults(&g_settings);
     settings_load(&g_settings, fe_path("settings.ini").c_str());
     fe_controls_load();

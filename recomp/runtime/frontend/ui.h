@@ -31,7 +31,8 @@ enum { UI_DEV_KEYBOARD, UI_DEV_PAD };
 enum { UI_PAGE_DISPLAY, UI_PAGE_AUDIO, UI_PAGE_CONTROLS, UI_PAGE_GAME, UI_PAGE_RULES, UI_PAGE_ONLINE, UI_PAGE_SYSTEM, UI_PAGE_COUNT };
 
 // ---- services the menu needs from the platform ----
-// Remappable actions: player * 6 + {0-3 buttons 1-4, 4 start, 5 coin}.
+// Remappable actions: player * 10 + {0-3 stick up down left right, 4 5 the L and R buttons, 6 7 buttons 3 and 4,
+// 8 start, 9 coin}.
 struct UiHost {
     void        (*settings_changed)(void);          // apply g_settings and save them
     const char* (*controller_name)(int index);      // NULL when not connected
@@ -59,6 +60,11 @@ struct UiHost {
     void        (*online_join)(void);               // restart and join the game at g_settings.online_address
     void        (*online_leave)(void);              // restart for ordinary play
     int         (*online_ping)(void);               // ms, or -1
+    // controls: every controller button on an action, and which stick is the arcade stick (0 left, 1 right, 2 either)
+    int         (*pad_binding_count)(int action);
+    const char* (*pad_binding_at)(int action, int index);
+    int         (*get_stick)(int player);
+    void        (*set_stick)(int player, int v);
 };
 
 void ui_init(const UiHost* host);

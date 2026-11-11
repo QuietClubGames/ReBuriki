@@ -50,7 +50,7 @@ struct Item {
     int nchoices;
     int lo, hi, step;            // slider
     void (*action)(void);
-    int binding;                 // 0-5: button 1-4, start, coin (of the player chosen on the page)
+    int binding;                 // 0-9: stick up down left right, L, R, buttons 3 4, start, coin (of the player chosen on the page)
     int (*enabled)(void);
     const char* (*info)(void);
     int (*dyn_count)(void);      // choices that depend on the PC (monitors, graphics cards)
@@ -88,6 +88,8 @@ static void set_deadzone(int v) { H->set_deadzone(v); }
 static int g_ctl_player;        // Controls page: which player's buttons are shown
 static int get_player(void) { return g_ctl_player; }
 static void set_player(int v) { g_ctl_player = v; }
+static int get_stick(void) { return H->get_stick(g_ctl_player); }
+static void set_stick(int v) { H->set_stick(g_ctl_player, v); }
 
 ACCESS(unlock_silber, unlock_silber)
 
@@ -159,6 +161,7 @@ static const char* const k_quality[] = {"Auto (keeps 60 fps)", "Performance  2\x
 static const char* const k_filter[] = {"Sharp", "Smooth", "Scanlines"};
 static const char* const k_pacing[] = {"Arcade speed  59.43 Hz", "Display vsync"};
 static const char* const k_player[] = {"Player 1", "Player 2"};
+static const char* const k_stick[] = {"Left stick", "Right stick", "Either stick"};
 static const char* const k_offon[] = {"Off", "On"};
 static const char* const k_difficulty[] = {"Easy", "Normal", "Hard", "Hardest"};
 static const char* const k_attack[] = {"Light", "Normal", "Heavy"};
@@ -195,7 +198,7 @@ static const char* name_gpu(int i) { return i == 0 ? "Automatic (fastest)" : H->
 #define BIND(lbl, hlp, n) {IT_BINDING, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, n, nullptr, nullptr, nullptr, nullptr}
 #define INFO(lbl, hlp, fn) {IT_INFO, lbl, hlp, nullptr, nullptr, nullptr, 0, 0, 0, 0, nullptr, 0, nullptr, fn, nullptr, nullptr}
 
-#define BIND_HELP "Select, then press the key or controller button you want for this. Esc cancels."
+#define BIND_HELP "Select, then press a key to set the key, or a controller button to add it (or take it off if it's already there)."
 
 static const Item k_display[] = {
     CHOICE("Display mode", "Borderless keeps alt-tab instant. Exclusive takes over the monitor. Alt+Enter / F11 also switch.", get_display_mode, set_display_mode, k_mode, nullptr),
@@ -216,15 +219,20 @@ static const Item k_audio[] = {
 };
 static const Item k_controls[] = {
     INFO("Controllers", "Xbox controllers: the first one connected is player 1, the second is player 2.", info_controllers),
-    CHOICE("Player", "Whose keys and buttons to change. Each row shows the keyboard key, then the controller button.", get_player, set_player, k_player, nullptr),
-    BIND("Button 1", BIND_HELP, 0),
-    BIND("Button 2", BIND_HELP, 1),
-    BIND("Button 3", BIND_HELP, 2),
-    BIND("Button 4", BIND_HELP, 3),
-    BIND("Start", BIND_HELP, 4),
-    BIND("Insert coin", BIND_HELP, 5),
-    SLIDER("Stick dead zone", "How far the left stick must move before it counts.", get_deadzone, set_deadzone, 10, 90, 5),
-    ACTION("Restore defaults", "Keyboard: arrows Z X C V 1 5 and R F D G A S Q W 2 6. Pads: X Y A B, Start, Back.", act_reset_binds, nullptr),
+    CHOICE("Player", "Whose keys and buttons to change. Each row shows the keyboard key, then the controller buttons.", get_player, set_player, k_player, nullptr),
+    BIND("Move left  (L button)", BIND_HELP, 4),
+    BIND("Move right  (R button)", BIND_HELP, 5),
+    CHOICE("Attack stick", "Which stick on the controller works as the arcade's stick, the one that attacks.", get_stick, set_stick, k_stick, nullptr),
+    BIND("Stick up", BIND_HELP, 0),
+    BIND("Stick down", BIND_HELP, 1),
+    BIND("Stick left", BIND_HELP, 2),
+    BIND("Stick right", BIND_HELP, 3),
+    BIND("Start", BIND_HELP, 8),
+    BIND("Insert coin", BIND_HELP, 9),
+    BIND("Button 3", BIND_HELP, 6),
+    BIND("Button 4", BIND_HELP, 7),
+    SLIDER("Stick dead zone", "How far a stick must move before it counts.", get_deadzone, set_deadzone, 10, 90, 5),
+    ACTION("Restore defaults", "Keys: arrows Z X C V 1 5, and R F D G A S Q W 2 6. Pad: LT LB A left, RT RB B right, D-pad or either stick attacks.", act_reset_binds, nullptr),
 };
 static const Item k_game[] = {
     TOGGLE_EN("Unlock Silber", "The hidden twelfth fighter, Original Karate, at the bottom of the style list. Off: locked until earned, as in the arcade.", get_unlock_silber, set_unlock_silber, offline),
@@ -277,6 +285,7 @@ static const Section k_sections[] = {
 };
 #define NSECT 7
 #define MAXROWS 16
+#define VISROWS 11              // rows that fit on the panel; a longer page scrolls to keep the chosen row in view
 
 static int choice_count(const Item* it) { return it->dyn_count ? it->dyn_count() : it->nchoices; }
 static const char* choice_name(const Item* it, int v) {
@@ -288,7 +297,7 @@ static const char* choice_name(const Item* it, int v) {
 // ---------------------------------------------------------------- state
 static int g_open;              // target state
 static float g_t;               // 0 closed .. 1 open (animated)
-static int g_sect, g_row[NSECT];
+static int g_sect, g_row[NSECT], g_top[NSECT];
 static float g_sel_y, g_tab_x, g_tab_w;   // animated highlight positions
 static float g_knob[NSECT][MAXROWS];      // toggle knob / slider animation
 static int g_device = UI_DEV_KEYBOARD;
@@ -397,7 +406,7 @@ void ui_key(int key, int device) {
     case UI_NEXT_TAB: g_sect = (g_sect + 1) % NSECT; select_valid(1); break;
     case UI_OK:
         if (it->type == IT_ACTION) it->action();
-        else if (it->type == IT_BINDING) H->start_capture(g_ctl_player * 6 + it->binding);
+        else if (it->type == IT_BINDING) H->start_capture(g_ctl_player * 10 + it->binding);
         else if (it->type == IT_TEXT) { g_edit = it; snprintf(g_edit_buf, sizeof g_edit_buf, "%s", it->text_get()); }
         else if (it->type == IT_TOGGLE || it->type == IT_CHOICE) change(it, 1);
         break;
@@ -531,7 +540,18 @@ static void draw_menu(float vw, float vh) {
 
     // rows
     const float y0 = py + 210, rows_bottom = py + Hh - 124;
-    float target_y = y0 + (float)g_row[g_sect] * (row_h + gap);
+    int top = g_top[g_sect];
+    if (g_row[g_sect] < top) top = g_row[g_sect];
+    if (g_row[g_sect] >= top + VISROWS) top = g_row[g_sect] - VISROWS + 1;
+    if (top > s->n - VISROWS) top = s->n > VISROWS ? s->n - VISROWS : 0;
+    g_top[g_sect] = top;
+    float target_y = y0 + (float)(g_row[g_sect] - top) * (row_h + gap);
+    if (s->n > VISROWS) {           // a slim bar on the right: where this view is in the list
+        const float th = (float)VISROWS * (row_h + gap) - gap, bh = th * (float)VISROWS / (float)s->n;
+        const float by = y0 + (th - bh) * (float)top / (float)(s->n - VISROWS);
+        uip_rect(px + W - 24, y0, 4, th, 2, fade(0xFFFFFF10u, a), fade(0xFFFFFF10u, a), 0, 0, 0);
+        uip_rect(px + W - 24, by, 4, bh, 2, fade(COL_GOLD, a * 0.8f), fade(COL_GOLD, a * 0.8f), 0, 0, 0);
+    }
     if (g_sel_y == 0) g_sel_y = target_y;
     int capturing = H->capturing();
     {
@@ -541,7 +561,8 @@ static void draw_menu(float vw, float vh) {
     }
     for (int r = 0; r < s->n; r++) {
         const Item* it = &s->items[r];
-        float y = y0 + (float)r * (row_h + gap);
+        if (r < top || r >= top + VISROWS) continue;
+        float y = y0 + (float)(r - top) * (row_h + gap);
         // while the panel is still growing, rows below its edge fade in
         float ra = (rows_bottom - y) / row_h;
         if (ra <= 0) continue;
@@ -589,7 +610,7 @@ static void draw_menu(float vw, float vh) {
             break;
         }
         case IT_BINDING: {
-            int action = g_ctl_player * 6 + it->binding;
+            int action = g_ctl_player * 10 + it->binding;
             if (capturing == action) {
                 float pulse = 0.5f + 0.5f * sinf(g_time * 5.0f);
                 const char* msg = "Press a key or button\xE2\x80\xA6";
@@ -598,11 +619,13 @@ static void draw_menu(float vw, float vh) {
                          fade(0xE8B64C20u, a), 1, fade(COL_GOLD, a * (0.6f + 0.4f * pulse)), 0);
                 text_c(rx - w2 / 2, vcenter(cy - 17, 34, UI_FONT_SMALL), UI_FONT_SMALL, fade(COL_TEXT, a), msg);
             } else {
-                // controller button on the right, keyboard key to its left
-                float bw = button_glyph(rx, cy, H->pad_binding_name(action), a, 1);
+                // controller buttons on the right (all that are on it), keyboard key to their left
+                float bx = rx;
+                int nb = H->pad_binding_count(action);
+                for (int i = (nb ? nb : 1) - 1; i >= 0; i--) bx -= button_glyph(bx, cy, H->pad_binding_at(action, i), a, 1) + 8;
                 const char* kn = H->key_binding_name(action);
                 float kw = key_glyph_w(kn);
-                key_glyph(rx - bw - 18 - kw, cy, kn, a);
+                key_glyph(bx - 10 - kw, cy, kn, a);
             }
             break;
         }
